@@ -32,6 +32,9 @@
 #endif
 
 #include "paging.h"
+
+#ifdef CORE_SIMPLE
+
 #define SegBase(c)	SegPhys(c)
 #define LoadMb(off) mem_readb(off)
 #define LoadMw(off) mem_readw(off)
@@ -205,3 +208,5 @@ Bits CPU_Core_Simple_Trap_Run(void) {
 void CPU_Core_Simple_Init(void) {
 
 }
+
+#endif

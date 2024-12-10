@@ -72,7 +72,12 @@ typedef enum scalerOperation {
 	scalerLast
 } scalerOperation_t;
 
+#ifdef _EE
+typedef Bit8u * (* VGA_Line_Handler)(Bitu vidstart, Bitu line, Bit8u *address);
+typedef void (*ScalerLineHandler_t)(Bitu vidstart, Bitu line, VGA_Line_Handler handler);
+#else
 typedef void (*ScalerLineHandler_t)(const void *src);
+#endif
 typedef void (*ScalerComplexHandler_t)(void);
 
 extern Bit8u Scaler_Aspect[];

@@ -1199,7 +1199,7 @@ static float calc_vol(Bit8u amount) {
 		db *= 2.0f;
 		if (count > 20) db -= 1.0f;
 	}
-	return (float) pow (10.0f,-0.05f * db);
+	return (float) powf (10.0f,-0.05f * db);
 }
 static void CTMIXER_UpdateVolumes(void) {
 	if (!sb.mixer.enabled) return;

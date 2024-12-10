@@ -2214,8 +2214,12 @@ public:
 
 		/* Init the cpu cores */
 		CPU_Core_Normal_Init();
+#ifdef CORE_SIMPLE
 		CPU_Core_Simple_Init();
+#endif
+#ifdef CORE_FULL
 		CPU_Core_Full_Init();
+#endif
 #if (C_DYNAMIC_X86)
 		CPU_Core_Dyn_X86_Init();
 #elif (C_DYNREC)
@@ -2315,10 +2319,14 @@ public:
 		cpudecoder=&CPU_Core_Normal_Run;
 		if (core == "normal") {
 			cpudecoder=&CPU_Core_Normal_Run;
+#ifdef CORE_SIMPLE
 		} else if (core =="simple") {
 			cpudecoder=&CPU_Core_Simple_Run;
+#endif
+#ifdef CORE_FULL
 		} else if (core == "full") {
 			cpudecoder=&CPU_Core_Full_Run;
+#endif
 		} else if (core == "auto") {
 			cpudecoder=&CPU_Core_Normal_Run;
 #if (C_DYNAMIC_X86)

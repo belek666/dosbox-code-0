@@ -43,7 +43,7 @@ struct JoyStick {
 	enum {JOYMAP_SQUARE,JOYMAP_CIRCLE,JOYMAP_INBETWEEN} mapstate;
 	bool enabled;
 	float xpos, ypos; //position as set by SDL.
-	double xtick, ytick;
+	float xtick, ytick;
 	Bitu xcount, ycount;
 	bool button[2];
 	int deadzone; //Deadzone (value between 0 and 100) interpreted as percentage.
@@ -182,7 +182,7 @@ static Bitu read_p201(Bitu port,Bitu iolen) {
 
 static Bitu read_p201_timed(Bitu port,Bitu iolen) {
 	Bit8u ret=0xff;
-	double currentTick = PIC_FullIndex();
+	float currentTick = PIC_FullIndex();
 	if( stick[0].enabled ){
 		if( stick[0].xtick < currentTick ) ret &=~1;
 		if( stick[0].ytick < currentTick ) ret &=~2;
@@ -222,19 +222,19 @@ static void write_p201_timed(Bitu port,Bitu val,Bitu iolen) {
 	// Axes take time = 24.2 microseconds + ( 0.011 microsecons/ohm * resistance )
 	// to reset to 0
 	// Pre-calculate the time at which each axis hits 0 here
-	double currentTick = PIC_FullIndex();
+	float currentTick = PIC_FullIndex();
 	if (stick[0].enabled) {
 		stick[0].transform_input();
 		stick[0].xtick = currentTick + 1000.0*( JOY_S_CONSTANT + S_PER_OHM *
-		                 (double)(((stick[0].xfinal+1.0)* OHMS)) );
+		                 (float)(((stick[0].xfinal+1.0)* OHMS)) );
 		stick[0].ytick = currentTick + 1000.0*( JOY_S_CONSTANT + S_PER_OHM *
-		                 (double)(((stick[0].yfinal+1.0)* OHMS)) );
+		                 (float)(((stick[0].yfinal+1.0)* OHMS)) );
 	}
 	if (stick[1].enabled) {
 		stick[1].xtick = currentTick + 1000.0*( JOY_S_CONSTANT + S_PER_OHM *
-		                 (double)((swap34? stick[1].ypos : stick[1].xpos)+1.0) * OHMS);
+		                 (float)((swap34? stick[1].ypos : stick[1].xpos)+1.0) * OHMS);
 		stick[1].ytick = currentTick + 1000.0*( JOY_S_CONSTANT + S_PER_OHM *
-		                 (double)((swap34? stick[1].xpos : stick[1].ypos)+1.0) * OHMS);
+		                 (float)((swap34? stick[1].xpos : stick[1].ypos)+1.0) * OHMS);
 	}
 }
 

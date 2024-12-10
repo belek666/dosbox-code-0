@@ -163,8 +163,8 @@ static void write_lightpen(Bitu port,Bitu /*val*/,Bitu) {
 		if (!vga.other.lightpen_triggered) {
 			vga.other.lightpen_triggered = true; // TODO: this shows at port 3ba/3da bit 1
 
-			double timeInFrame = PIC_FullIndex()-vga.draw.delay.framestart;
-			double timeInLine = fmod(timeInFrame,vga.draw.delay.htotal);
+			float timeInFrame = PIC_FullIndex()-vga.draw.delay.framestart;
+			float timeInLine = fmodf(timeInFrame,vga.draw.delay.htotal);
 			Bitu current_scanline = (Bitu)(timeInFrame / vga.draw.delay.htotal);
 
 			vga.other.lightpen = (Bit16u)((vga.draw.address_add/2) * (current_scanline/2));
@@ -175,7 +175,7 @@ static void write_lightpen(Bitu port,Bitu /*val*/,Bitu) {
 	}
 }
 
-static double hue_offset = 0.0;
+static float hue_offset = 0.0;
 static Bit8u cga_comp = 0;
 static bool new_cga = 0;
 
@@ -191,11 +191,11 @@ static void cga16_color_select(Bit8u val) {
 static void update_cga16_color(void) {
 // New algorithm based on code by reenigne
 // Works in all CGA graphics modes/color settings and can simulate older and newer CGA revisions
-	static const double tau = 6.28318531; // == 2*pi
-	static const double ns = 567.0/440;  // degrees of hue shift per nanosecond
+	static const float tau = 6.28318531; // == 2*pi
+	static const float ns = 567.0/440;  // degrees of hue shift per nanosecond
 
-	double tv_brightness = 0.0; // hardcoded for simpler implementation
-	double tv_saturation = (new_cga ? 0.7 : 0.6);
+	float tv_brightness = 0.0; // hardcoded for simpler implementation
+	float tv_saturation = (new_cga ? 0.7 : 0.6);
 
 	bool bw = (vga.tandy.mode_control&4) != 0;
 	bool color_sel = (cga16_val&0x20) != 0;
@@ -203,14 +203,14 @@ static void update_cga16_color(void) {
 	bool bpp1 = (vga.tandy.mode_control&0x10) != 0;
 	Bit8u overscan = cga16_val&0x0f;  // aka foreground colour in 1bpp mode
 
-	double chroma_coefficient = new_cga ? 0.29 : 0.72;
-	double b_coefficient = new_cga ? 0.07 : 0;
-	double g_coefficient = new_cga ? 0.22 : 0;
-	double r_coefficient = new_cga ? 0.1 : 0;
-	double i_coefficient = new_cga ? 0.32 : 0.28;
-	double rgbi_coefficients[0x10];
+	float chroma_coefficient = new_cga ? 0.29 : 0.72;
+	float b_coefficient = new_cga ? 0.07 : 0;
+	float g_coefficient = new_cga ? 0.22 : 0;
+	float r_coefficient = new_cga ? 0.1 : 0;
+	float i_coefficient = new_cga ? 0.32 : 0.28;
+	float rgbi_coefficients[0x10];
 	for (int c = 0; c < 0x10; c++) {
-		double v = 0;
+		float v = 0;
 		if ((c & 1) != 0)
 			v += b_coefficient;
 		if ((c & 2) != 0)
@@ -223,8 +223,8 @@ static void update_cga16_color(void) {
 	}
 
 	// The pixel clock delay calculation is not accurate for 2bpp, but the difference is small and a more accurate calculation would be too slow.
-	static const double rgbi_pixel_delay = 15.5*ns;
-	static const double chroma_pixel_delays[8] = {
+	static const float rgbi_pixel_delay = 15.5*ns;
+	static const float chroma_pixel_delays[8] = {
 		0,        // Black:   no chroma
 		35*ns,    // Blue:    no XORs
 		44.5*ns,  // Green:   XOR on rising and falling edges
@@ -233,23 +233,23 @@ static void update_cga16_color(void) {
 		39.5*ns,  // Magenta: XOR on falling but not rising edge
 		44.5*ns,  // Yellow:  XOR on rising and falling edges
 		39.5*ns}; // White:   XOR on falling but not rising edge
-	double pixel_clock_delay;
+	float pixel_clock_delay;
 	int o = overscan == 0 ? 15 : overscan;
 	if (overscan == 8)
 		pixel_clock_delay = rgbi_pixel_delay;
 	else {
-		double d = rgbi_coefficients[o];
+		float d = rgbi_coefficients[o];
 		pixel_clock_delay = (chroma_pixel_delays[o & 7]*chroma_coefficient + rgbi_pixel_delay*d)/(chroma_coefficient + d);
 	}
 	pixel_clock_delay -= 21.5*ns;  // correct for delay of color burst
 
-	double hue_adjust = (-(90-33)-hue_offset+pixel_clock_delay)*tau/360.0;
-	double chroma_signals[8][4];
+	float hue_adjust = (-(90-33)-hue_offset+pixel_clock_delay)*tau/360.0;
+	float chroma_signals[8][4];
 	for (Bit8u i=0; i<4; i++) {
 		chroma_signals[0][i] = 0;
 		chroma_signals[7][i] = 1;
 		for (Bit8u j=0; j<6; j++) {
-			static const double phases[6] = {
+			static const float phases[6] = {
 				270 - 21.5*ns,  // blue
 				135 - 29.5*ns,  // green
 				180 - 21.5*ns,  // cyan
@@ -257,7 +257,7 @@ static void update_cga16_color(void) {
 				315 - 29.5*ns,  // magenta
 				 90 - 21.5*ns}; // yellow/burst
 			// All the duty cycle fractions are the same, just under 0.5 as the rising edge is delayed 2ns more than the falling edge.
-			static const double duty = 0.5 - 2*ns/360.0;
+			static const float duty = 0.5 - 2*ns/360.0;
 
 			// We have a rectangle wave with period 1 (in units of the reciprocal of the color burst frequency) and duty
 			// cycle fraction "duty" and phase "phase". We band-limit this wave to frequency 2 and sample it at intervals of 1/4.
@@ -268,14 +268,14 @@ static void update_cga16_color(void) {
 			//   b = 2*integral(0, 1, f(x)*sin(x*tau)*dx) = 2*integral(0, duty, sin(x*tau)*dx) = 2*(1-cos(x*tau))/tau
 			//   c = 2*integral(0, 1, f(x)*cos(x*tau)*dx) = 2*integral(0, duty, cos(x*tau)*dx) = 2*sin(duty*tau)/tau
 			//   d = 2*integral(0, 1, f(x)*sin(x*2*tau)*dx) = 2*integral(0, duty, sin(x*4*pi)*dx) = 2*(1-cos(2*tau*duty))/(2*tau)
-			double a = duty;
-			double b = 2.0*(1.0-cos(duty*tau))/tau;
-			double c = 2.0*sin(duty*tau)/tau;
-			double d = 2.0*(1.0-cos(duty*2*tau))/(2*tau);
+			float a = duty;
+			float b = 2.0*(1.0-cosf(duty*tau))/tau;
+			float c = 2.0*sinf(duty*tau)/tau;
+			float d = 2.0*(1.0-cosf(duty*2*tau))/(2*tau);
 
-			double x = (phases[j] + 21.5*ns + pixel_clock_delay)/360.0 + i/4.0;
+			float x = (phases[j] + 21.5*ns + pixel_clock_delay)/360.0 + i/4.0;
 
-			chroma_signals[j+1][i] = a + b*sin(x*tau) + c*cos(x*tau) + d*sin(x*2*tau);
+			chroma_signals[j+1][i] = a + b*sinf(x*tau) + c*cosf(x*tau) + d*sinf(x*2*tau);
 		}
 	}
 	Bitu CGApal[4] = {
@@ -287,7 +287,7 @@ static void update_cga16_color(void) {
 	for (Bit8u x=0; x<4; x++) {	 // Position of pixel in question
 		bool even = (x & 1) == 0;
 		for (Bit8u bits=0; bits<(even ? 0x10 : 0x40); ++bits) {
-			double Y=0, I=0, Q=0;
+			float Y=0, I=0, Q=0;
 			for (Bit8u p=0; p<4; p++) {  // Position within color carrier cycle
 				// generate pixel pattern.
 				Bit8u rgbi;
@@ -303,34 +303,34 @@ static void update_cga16_color(void) {
 					c = 7;
 
 				// calculate composite output
-				double chroma = chroma_signals[c][(p+x)&3]*chroma_coefficient;
-				double composite = chroma + rgbi_coefficients[rgbi];
+				float chroma = chroma_signals[c][(p+x)&3]*chroma_coefficient;
+				float composite = chroma + rgbi_coefficients[rgbi];
 
 				Y+=composite;
 				if (!bw) { // burst on
-					I+=composite*2*cos(hue_adjust + (p+x)*tau/4.0);
-					Q+=composite*2*sin(hue_adjust + (p+x)*tau/4.0);
+					I+=composite*2*cosf(hue_adjust + (p+x)*tau/4.0);
+					Q+=composite*2*sinf(hue_adjust + (p+x)*tau/4.0);
 				}
 			}
 
-			double contrast = 1 - tv_brightness;
+			float contrast = 1 - tv_brightness;
 
 			Y = (contrast*Y/4.0) + tv_brightness; if (Y>1.0) Y=1.0; if (Y<0.0) Y=0.0;
 			I = (contrast*I/4.0) * tv_saturation; if (I>0.5957) I=0.5957; if (I<-0.5957) I=-0.5957;
 			Q = (contrast*Q/4.0) * tv_saturation; if (Q>0.5226) Q=0.5226; if (Q<-0.5226) Q=-0.5226;
 
-			static const double gamma = 2.2;
+			static const float gamma = 2.2;
 
-			double R = Y + 0.9563*I + 0.6210*Q;	R = (R - 0.075) / (1-0.075); if (R<0) R=0; if (R>1) R=1;
-			double G = Y - 0.2721*I - 0.6474*Q;	G = (G - 0.075) / (1-0.075); if (G<0) G=0; if (G>1) G=1;
-			double B = Y - 1.1069*I + 1.7046*Q;	B = (B - 0.075) / (1-0.075); if (B<0) B=0; if (B>1) B=1;
-			R = pow(R, gamma);
-			G = pow(G, gamma);
-			B = pow(B, gamma);
+			float R = Y + 0.9563*I + 0.6210*Q;	R = (R - 0.075) / (1-0.075); if (R<0) R=0; if (R>1) R=1;
+			float G = Y - 0.2721*I - 0.6474*Q;	G = (G - 0.075) / (1-0.075); if (G<0) G=0; if (G>1) G=1;
+			float B = Y - 1.1069*I + 1.7046*Q;	B = (B - 0.075) / (1-0.075); if (B<0) B=0; if (B>1) B=1;
+			R = powf(R, gamma);
+			G = powf(G, gamma);
+			B = powf(B, gamma);
 
-			int r = static_cast<int>(255*pow( 1.5073*R -0.3725*G -0.0832*B, 1/gamma)); if (r<0) r=0; if (r>255) r=255;
-			int g = static_cast<int>(255*pow(-0.0275*R +0.9350*G +0.0670*B, 1/gamma)); if (g<0) g=0; if (g>255) g=255;
-			int b = static_cast<int>(255*pow(-0.0272*R -0.0401*G +1.1677*B, 1/gamma)); if (b<0) b=0; if (b>255) b=255;
+			int r = static_cast<int>(255*powf( 1.5073*R -0.3725*G -0.0832*B, 1/gamma)); if (r<0) r=0; if (r>255) r=255;
+			int g = static_cast<int>(255*powf(-0.0275*R +0.9350*G +0.0670*B, 1/gamma)); if (g<0) g=0; if (g>255) g=255;
+			int b = static_cast<int>(255*powf(-0.0272*R -0.0401*G +1.1677*B, 1/gamma)); if (b<0) b=0; if (b>255) b=255;
 
 			Bit8u index = bits | ((x & 1) == 0 ? 0x30 : 0x80) | ((x & 2) == 0 ? 0x40 : 0);
 			RENDER_SetPal(index,r,g,b);
@@ -771,13 +771,13 @@ Bitu read_herc_status(Bitu /*port*/,Bitu /*iolen*/) {
 	//			111: Unknown clone
 	//       7  Vertical sync inverted
 
-	double timeInFrame = PIC_FullIndex()-vga.draw.delay.framestart;
+	float timeInFrame = PIC_FullIndex()-vga.draw.delay.framestart;
 	Bit8u retval=0x72; // Hercules ident; from a working card (Winbond W86855AF)
 					// Another known working card has 0x76 ("KeysoGood", full-length)
 	if (timeInFrame < vga.draw.delay.vrstart ||
 		timeInFrame > vga.draw.delay.vrend) retval |= 0x80;
 
-	double timeInLine=fmod(timeInFrame,vga.draw.delay.htotal);
+	float timeInLine=fmodf(timeInFrame,vga.draw.delay.htotal);
 	if (timeInLine >= vga.draw.delay.hrstart &&
 		timeInLine <= vga.draw.delay.hrend) retval |= 0x1;
 

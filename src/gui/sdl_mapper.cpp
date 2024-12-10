@@ -25,10 +25,6 @@
 #include <stdio.h>
 #include <assert.h>
 
-
-#include "SDL.h"
-#include "SDL_thread.h"
-
 #include "dosbox.h"
 #include "video.h"
 #include "keyboard.h"
@@ -37,6 +33,11 @@
 #include "mapper.h"
 #include "setup.h"
 #include "pic.h"
+
+#ifndef _EE
+
+#include "SDL.h"
+#include "SDL_thread.h"
 
 enum {
 	CLR_BLACK=0,
@@ -2559,4 +2560,92 @@ void MAPPER_StartUp(Section * sec) {
 	mapper.filename = pp->realpath;
 	MAPPER_AddHandler(&MAPPER_Run,MK_f1,MMOD1,"mapper","Mapper");
 }
+#else
+
+#define BMOD_Mod1 0x0001
+#define BMOD_Mod2 0x0002
+#define BMOD_Mod3 0x0004
+
+class CHandlerEvent;
+
+static std::vector<CHandlerEvent *> handlergroup;
+typedef std::vector<CHandlerEvent *>::iterator CHandlerEventVector_it;
+
+class CHandlerEvent {
+public:
+	CHandlerEvent(char const * const _entry,MAPPER_Handler * _handler,MapKeys _key,Bitu _mod,char const * const _buttonname) {
+		handler=_handler;
+		defmod=_mod;
+		defkey=_key;
+		buttonname=_buttonname;
+		handlergroup.push_back(this);
+	}
+	void Active(bool yesno) {
+		(*handler)(yesno);
+	};
+	const char * ButtonName(void) {
+		return buttonname;
+	}
+	
+	bool CheckBinds(Bitu modkey, MapKeys key)
+	{
+		if(modkey == defmod && key == defkey)
+		return true;
+		else
+		return false;	
+	}
+protected:
+	MapKeys defkey;
+	Bitu defmod;
+	MAPPER_Handler * handler;
+public:
+	const char * buttonname;
+};
+
+void MAPPER_Init(void) {
+	return;
+}
+
+void MAPPER_RunInternal() {
+	return;
+}
+
+void MAPPER_Dummy(bool pressed)
+{
+}
+
+void MAPPER_StartUp(Section * sec) {
+	Section_prop * section=static_cast<Section_prop *>(sec);
+	MAPPER_AddHandler(&MAPPER_Dummy,MK_f1,MMOD1,"dummy","Dummy");
+}
+
+void MAPPER_AddHandler(MAPPER_Handler * handler,MapKeys key,Bitu mods,char const * const eventname,char const * const buttonname) {
+	//Check if it already exists=> if so return.
+	for(CHandlerEventVector_it it=handlergroup.begin();it!=handlergroup.end();it++)
+		if(strcmp((*it)->buttonname,buttonname) == 0) return;
+
+	char tempname[17];
+	strcpy(tempname,"hand_");
+	strcat(tempname,eventname);
+	new CHandlerEvent(tempname,handler,key,mods,buttonname);
+	return ;
+}
+	
+void MAPPER_CheckEvent(Bitu modkey, MapKeys key, bool pressed)
+{
+	for(CHandlerEventVector_it it=handlergroup.begin();it!=handlergroup.end();it++)
+	{
+		if((*it)->CheckBinds(modkey, key))	
+		(*it)->Active(pressed);
+	}
+	
+}
+
+void MAPPER_Run(bool pressed) {
+
+}
+
+#endif
+
+
 

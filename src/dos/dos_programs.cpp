@@ -202,7 +202,7 @@ public:
 			Move_Z(newz[0]);
 			return;
 		}
-
+#ifndef _EE
 		/* Show list of cdroms */
 		if (cmd->FindExist("-cd",false)) {
 			int num = SDL_CDNumDrives();
@@ -212,7 +212,7 @@ public:
 			};
 			return;
 		}
-
+#endif
 		std::string type="dir";
 		cmd->FindString("-t",type,true);
 		bool iscdrom = (type =="cdrom"); //Used for mscdex bug cdrom label name emulation
@@ -1558,7 +1558,7 @@ void IMGMOUNT_ProgramStart(Program * * make) {
 	*make=new IMGMOUNT;
 }
 
-
+#ifdef USE_ALT_KEYB
 Bitu DOS_SwitchKeyboardLayout(const char* new_layout, Bit32s& tried_cp);
 Bitu DOS_LoadKeyboardLayout(const char * layoutname, Bit32s codepage, const char * codepagefile);
 const char* DOS_GetLoadedLayout(void);
@@ -1630,7 +1630,109 @@ void KEYB::Run(void) {
 static void KEYB_ProgramStart(Program * * make) {
 	*make=new KEYB;
 }
+#else
 
+#include "keyboard.h"
+
+// INPUTMAP
+
+extern keymap inputmap[];
+extern bool control_map;
+extern bool joy_state;
+typedef struct keyinfo {
+	KBD_KEYS key;
+	const char *ascii;
+} keyinfo;
+
+class INPUTMAP : public Program {
+public:
+	void Run(void);
+private:
+	static const char *button[]; 
+	static const keyinfo chartab[];
+};
+
+const keyinfo INPUTMAP::chartab[] = 
+	{{KBD_1,"1"},{KBD_2,"2"},{KBD_3,"3"},{KBD_4,"4"},{KBD_5,"5"},{KBD_6,"6"},{KBD_7,"7"},{KBD_8,"8"},{KBD_9,"9"},{KBD_0,"0"},
+	{KBD_q,"q"},{KBD_w,"w"},{KBD_e,"e"},{KBD_r,"r"},{KBD_t,"t"},{KBD_y,"y"},{KBD_u,"u"},{KBD_i,"i"},{KBD_o,"o"},{KBD_p,"p"},
+	{KBD_a,"a"},{KBD_s,"s"},{KBD_d,"d"},{KBD_f,"f"},{KBD_g,"g"},{KBD_h,"h"},{KBD_j,"j"},{KBD_k,"k"},{KBD_l,"l"},{KBD_z,"z"},
+	{KBD_x,"x"},{KBD_c,"c"},{KBD_v,"v"},{KBD_b,"b"},{KBD_n,"n"},{KBD_m,"m"},
+	{KBD_f1,"f1"},{KBD_f2,"f2"},{KBD_f3,"f3"},{KBD_f4,"f4"},{KBD_f5,"f5"},{KBD_f6,"f6"},{KBD_f7,"f7"},
+	{KBD_f8,"f8"},{KBD_f9,"f9"},{KBD_f10,"f10"},{KBD_f11,"f11"},{KBD_f12,"f12"},
+	{KBD_esc,"esc"},{KBD_tab,"tab"},{KBD_backspace,"bs"},{KBD_enter,"enter"},{KBD_space,"space"},
+	{KBD_leftalt,"lalt"},{KBD_rightalt,"ralt"},{KBD_leftctrl,"lctrl"},{KBD_rightctrl,"rctrl"},{KBD_leftshift,"lshift"},{KBD_rightshift,"rshift"},
+	{KBD_capslock,"caplock"},{KBD_scrolllock,"scrllock"},{KBD_numlock,"numlock"},
+	{KBD_grave,"`"},{KBD_minus,"-"},{KBD_equals,"="},{KBD_backslash,"\\"},{KBD_leftbracket,"["},{KBD_rightbracket,"]"},
+	{KBD_semicolon,";"},{KBD_quote,"'"},{KBD_period,"."},{KBD_comma,","},{KBD_slash,"/"},
+	{KBD_insert,"insert"},{KBD_home,"home"},{KBD_pageup,"pgup"},{KBD_delete,"del"},{KBD_end,"end"},{KBD_pagedown,"pgdn"},
+	{KBD_left,"left"},{KBD_up,"up"},{KBD_down,"down"},{KBD_right,"right"},
+	{KBD_kp1,"n1"},{KBD_kp2,"n2"},{KBD_kp3,"n3"},{KBD_kp4,"n4"},{KBD_kp5,"n5"},{KBD_kp6,"n6"},{KBD_kp7,"n7"},{KBD_kp8,"n8"},{KBD_kp9,"n9"},{KBD_kp0,"n9"},
+	{KBD_kpdivide,"n/"},{KBD_kpmultiply,"n*"},{KBD_kpminus,"n-"},{KBD_kpplus,"n+"},{KBD_kpenter,"nenter"},{KBD_kpperiod,"n."},
+	{KBD_button1,"button1"},{KBD_button2,"button2"},{KBD_LAST, NULL}};
+
+const char *INPUTMAP::button[] = {"select", "start", "up", "right", "down", "left", "triangle", "circle", "cross", "square", "l1", "r1", "l2", "r2", 
+	"l3", "r3", NULL}; 
+
+
+void INPUTMAP::Run(void) {
+	if(!cmd->GetCount()) {
+		WriteOut(MSG_Get("PROGRAM_INPUTMAP_USAGE"));
+		return;
+	}
+	if(cmd->FindExist("exec", true)) {
+		Bitu commandNr = 1;
+		if (cmd->FindCommand(commandNr++,temp_line)) {
+			// get Filename
+			char filename[128];
+			strncpy(filename,temp_line.c_str(),128 - 1);
+			// Setup commandline
+			bool ok;
+			char args[256];
+			size_t remaining = 0;
+			args[0] = 0;
+			do {
+				ok = cmd->FindCommand(commandNr++,temp_line);
+				remaining = 256 - strlen(args) - 1;
+				strncat(args,temp_line.c_str(),remaining);
+				remaining = 256 - strlen(args) - 1;
+				strncat(args," ",remaining);
+			} while (ok);			
+			// Use shell to start program
+			DOS_Shell shell;
+			control_map = true;
+			shell.Execute(filename,args);
+			//control_map = false;
+			return;
+		}
+	} else if(cmd->FindExist("analog", true)) {
+		if(cmd->FindExist("mouse", true)) joy_state=false;
+		else if(cmd->FindExist("joystick", true)) joy_state=true;
+		else WriteOut(MSG_Get("PROGRAM_INPUTMAP_INVALID"));
+		return;
+	} else {
+		std::string key;
+		for(Bitu i=0; button[i]; i++) {
+			if(cmd->FindString(button[i], key)==true) {
+				for(Bitu j=0; chartab[j].ascii; j++) {
+					if(key == chartab[j].ascii) {
+						if(chartab[j].key == KBD_LAST) break;
+						inputmap[i].key = chartab[j].key;
+						WriteOut(MSG_Get("PROGRAM_INPUTMAP_MAPPED"), chartab[j].ascii, button[i]);
+						return;
+					}
+				}
+				break;
+			}
+		}
+	}
+	WriteOut(MSG_Get("PROGRAM_INPUTMAP_INVALID"));
+}
+
+static void INPUTMAP_ProgramStart(Program * * make) {
+	*make = new INPUTMAP;
+}
+
+#endif
 
 void DOS_SetupPrograms(void) {
 	/*Add Messages */
@@ -1829,6 +1931,7 @@ void DOS_SetupPrograms(void) {
 	MSG_Add("PROGRAM_IMGMOUNT_NON_LOCAL_DRIVE", "The image must be on a host or local drive.\n");
 	MSG_Add("PROGRAM_IMGMOUNT_MULTIPLE_NON_CUEISO_FILES", "Using multiple files is only supported for cue/iso images.\n");
 
+#ifdef USE_ALT_KEYB
 	MSG_Add("PROGRAM_KEYB_INFO","Codepage %i has been loaded\n");
 	MSG_Add("PROGRAM_KEYB_INFO_LAYOUT","Codepage %i has been loaded for layout %s\n");
 	MSG_Add("PROGRAM_KEYB_SHOWHELP",
@@ -1843,6 +1946,12 @@ void DOS_SetupPrograms(void) {
 	MSG_Add("PROGRAM_KEYB_INVALIDFILE","Keyboard file %s invalid\n");
 	MSG_Add("PROGRAM_KEYB_LAYOUTNOTFOUND","No layout in %s for codepage %i\n");
 	MSG_Add("PROGRAM_KEYB_INVCPFILE","None or invalid codepage file for layout %s\n\n");
+#else
+	MSG_Add("PROGRAM_INPUTMAP_MAPPED", "Key %s is mapped to button %s.\n");
+	MSG_Add("PROGRAM_INPUTMAP_INVALID", "Invalid arguments.\n");
+	MSG_Add("PROGRAM_INPUTMAP_USAGE", "usage: inputmap [option]\nexec <cmdline>: run cmdline with input map\nanalog <mode>: mode sets mouse or joystick\n"
+		"<button> <keycode>: map button to keycode\n");
+#endif
 
 	/*regular setup*/
 	PROGRAMS_MakeFile("MOUNT.COM",MOUNT_ProgramStart);
@@ -1856,6 +1965,10 @@ void DOS_SetupPrograms(void) {
 #endif
 	PROGRAMS_MakeFile("LOADROM.COM", LOADROM_ProgramStart);
 	PROGRAMS_MakeFile("IMGMOUNT.COM", IMGMOUNT_ProgramStart);
+#ifdef USE_ALT_KEYB
 	PROGRAMS_MakeFile("KEYB.COM", KEYB_ProgramStart);
+#else
+	PROGRAMS_MakeFile("INPUTMAP.COM",INPUTMAP_ProgramStart);
+#endif
 
 }

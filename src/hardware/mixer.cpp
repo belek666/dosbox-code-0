@@ -35,7 +35,9 @@
 #include <mmsystem.h>
 #endif
 
+#ifndef _EE
 #include "SDL.h"
+#endif
 #include "mem.h"
 #include "pic.h"
 #include "dosbox.h"
@@ -64,6 +66,24 @@
 #define TICK_NEXT ( 1 << TICK_SHIFT)
 #define TICK_MASK (TICK_NEXT -1)
 
+#ifdef _EE
+#include <kernel.h>
+#include <audsrv.h>
+
+#define SDLCALL
+#define Uint8 Bit8u
+
+extern void *_gp;
+static u8 thread_stack[0x1000] __attribute__ ((aligned(16)));
+static int main_thread_id = -1;
+static int fill_thid = -1;
+static int audio_sema = -1;
+static volatile int num_chan = 0;
+
+#define SDL_LockAudio() WaitSema(audio_sema)
+#define SDL_UnlockAudio() SignalSema(audio_sema)
+
+#endif
 
 static INLINE Bit16s MIXER_CLIP(Bits SAMP) {
 	if (SAMP < MAX_AUDIO) {
@@ -88,7 +108,9 @@ static struct {
 	Bit32u blocksize;
 } mixer;
 
+#ifndef _EE
 Bit8u MixTemp[MIXER_BUFSIZE];
+#endif
 
 MixerChannel * MIXER_AddChannel(MIXER_Handler handler,Bitu freq,const char * name) {
 	MixerChannel * chan=new MixerChannel();
@@ -510,6 +532,11 @@ static void MIXER_Mix(void) {
 	mixer.needed+=(mixer.tick_counter >> TICK_SHIFT);
 	mixer.tick_counter &= TICK_MASK;
 	SDL_UnlockAudio();
+#ifdef _EE
+	if (mixer.done) {
+		WakeupThread(fill_thid);
+	}
+#endif
 }
 
 static void MIXER_Mix_NoSound(void) {
@@ -645,6 +672,29 @@ static void SDLCALL MIXER_CallBack(void * /*userdata*/, Uint8 *stream, int len) 
 
 #undef INDEX_SHIFT_LOCAL
 
+#ifdef _EE
+static int MIXER_FillBufferThread(void *argp) {
+	int len = mixer.blocksize;
+	Bit8u *buf = (Bit8u *)malloc(len);
+
+	for (;;) {
+		/*if (mixer.done < mixer.blocksize) {
+			SleepThread();
+			continue;
+		}*/
+
+		SDL_LockAudio();
+
+		MIXER_CallBack(0, buf, len);
+		
+		SDL_UnlockAudio();
+
+		audsrv_wait_audio(len);
+		audsrv_play_audio((char*)buf, len);
+	}
+}
+#endif
+
 static void MIXER_Stop(Section* /*sec*/) {
 }
 
@@ -750,6 +800,62 @@ void MIXER_Init(Section* sec) {
 	mixer.mastervol[0]=1.0f;
 	mixer.mastervol[1]=1.0f;
 
+#ifdef _EE
+	audsrv_fmt_t audio_settings;
+	ee_thread_t audio_thread;
+	ee_sema_t sema;
+	int ret;
+	
+	ret = audsrv_init();
+	if (ret != 0) {
+		printf("Audsrv returned error: %s\n", audsrv_get_error_string());
+		mixer.nosound = true;
+		return;
+	}
+	
+	audio_settings.freq = mixer.freq;
+	audio_settings.bits = 16;
+	audio_settings.channels = 2;
+  
+	ret = audsrv_set_format(&audio_settings);
+	if(ret != AUDSRV_ERR_NOERROR) {
+		printf("Audsrv returned error: %s\n", audsrv_get_error_string());
+		mixer.nosound = true;
+		return;
+	}
+	
+	audsrv_set_volume(MAX_VOLUME);
+	
+	mixer.tick_add=((mixer.freq) << TICK_SHIFT)/1000;
+	
+	sema.init_count = 1;
+	sema.max_count = 1;
+	sema.option = 0;
+	audio_sema = CreateSema(&sema);
+	
+	if (mixer.nosound) {
+		TIMER_AddTickHandler(MIXER_Mix_NoSound);
+	} else {
+		TIMER_AddTickHandler(MIXER_Mix);
+#if 1
+		main_thread_id = GetThreadId();
+
+		//ChangeThreadPriority(main_thread_id, 62);
+  
+		audio_thread.func = (void *)MIXER_FillBufferThread;
+		audio_thread.stack = thread_stack;
+		audio_thread.stack_size = sizeof(thread_stack);
+		audio_thread.gp_reg = _gp;
+		audio_thread.initial_priority = 60;
+
+		fill_thid = CreateThread(&audio_thread);
+	 
+		if (fill_thid) {
+			StartThread(fill_thid, NULL);
+		}
+#endif
+	}
+#else
 	/* Start the Mixer using SDL Sound at 22 khz */
 	SDL_AudioSpec spec;
 	SDL_AudioSpec obtained;
@@ -780,6 +886,7 @@ void MIXER_Init(Section* sec) {
 		TIMER_AddTickHandler(MIXER_Mix);
 		SDL_PauseAudio(0);
 	}
+#endif
 	//1000 = 8 *125
 	mixer.tick_counter = (mixer.freq%125)?TICK_NEXT:0;
 

@@ -44,8 +44,15 @@ enum KBD_KEYS {
 	KBD_kpdivide,KBD_kpmultiply,KBD_kpminus,KBD_kpplus,KBD_kpenter,KBD_kpperiod,
 
 	
-	KBD_LAST
+	KBD_button1, KBD_button2, KBD_LAST
 };
+
+#ifdef _EE
+typedef struct keymap {
+	KBD_KEYS key;
+	Bitu mask;
+} keymap;
+#endif
 
 void KEYBOARD_ClrBuffer(void);
 void KEYBOARD_AddKey(KBD_KEYS keytype,bool pressed);

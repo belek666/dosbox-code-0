@@ -20,11 +20,15 @@
 #define DOSBOX_TIMER_H
 
 /* underlying clock rate in HZ */
+#ifdef _EE
+#define GetTicks() (clock())
+#define SDL_Delay(x) usleep(x * 1000)
+#else
 #include <SDL.h>
+#define GetTicks() SDL_GetTicks()
+#endif
 
 #define PIT_TICK_RATE 1193182
-
-#define GetTicks() SDL_GetTicks()
 
 typedef void (*TIMER_TickHandler)(void);
 

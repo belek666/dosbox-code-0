@@ -140,6 +140,16 @@ typedef struct {
 	Bitu parts_left;
 	Bitu byte_panning_shift;
 	struct {
+#ifdef _EE
+		float framestart;
+		float vrstart, vrend;		// V-retrace
+		float hrstart, hrend;		// H-retrace
+		float hblkstart, hblkend;	// H-blanking
+		float vblkstart, vblkend;	// V-Blanking
+		float vdend, vtotal;
+		float hdend, htotal;
+		float parts;
+#else
 		double framestart;
 		double vrstart, vrend;		// V-retrace
 		double hrstart, hrend;		// H-retrace
@@ -148,6 +158,7 @@ typedef struct {
 		double vdend, vtotal;
 		double hdend, htotal;
 		double parts;
+#endif
 	} delay;
 	Bitu bpp;
 	double aspect_ratio;
@@ -382,6 +393,9 @@ typedef struct {
 
 typedef struct {
 	VGAModes mode;								/* The mode the vga system is in */
+#ifdef _EE
+	Bit8u force_update;
+#endif
 	Bit8u misc_output;
 	VGA_Draw draw;
 	VGA_Config config;

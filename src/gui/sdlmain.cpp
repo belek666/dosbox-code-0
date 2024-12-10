@@ -33,8 +33,9 @@
 #endif
 
 #include "cross.h"
+#ifndef _EE
 #include "SDL.h"
-
+#endif
 #include "dosbox.h"
 #include "video.h"
 #include "mouse.h"
@@ -206,6 +207,608 @@ struct private_hwdata {
 #define INCL_WIN
 #include <os2.h>
 #endif
+
+#ifdef _EE
+
+#define NEWLIB_PORT_AWARE
+
+#include <kernel.h>
+#include <tamtypes.h>
+#include <sbv_patches.h>
+#include <loadfile.h>
+#include <iopcontrol.h>
+#include <iopheap.h>
+#include <libhdd.h>
+#include <libpwroff.h>
+#include <sifrpc.h>
+#include <fileXio_rpc.h>
+#include <libpad.h>
+#include <libkbd.h>
+#include <libmouse.h>
+#include <sio.h>
+#include <fcntl.h>
+#include <fileio.h>
+
+#include "joystick.h"
+#include "keymap.h"
+
+static int sensitivity;
+bool control_map = false, joy_state = false, irkeyb = false, show_key_hint = false;
+bool autofire = false, startup_state_capslock = false, startup_state_numlock = false;
+
+extern int audio_sema;
+static bool reinit = false, key_hint = false;
+
+bool profile = false, fixup = false;
+
+#define PS2_ALL_BUTTON_MASK 0xFFFF
+
+keymap inputmap[] = {
+	{ KBD_esc, PAD_SELECT },
+	{ KBD_enter, PAD_START },
+	{ KBD_up, PAD_UP },
+	{ KBD_right, PAD_RIGHT },
+	{ KBD_down, PAD_DOWN },
+	{ KBD_left, PAD_LEFT },
+	{ KBD_w, PAD_TRIANGLE },
+	{ KBD_d, PAD_CIRCLE },
+	{ KBD_s, PAD_CROSS },
+	{ KBD_a, PAD_SQUARE },
+	{ KBD_button1, PAD_L1 },
+	{ KBD_button2, PAD_R1 },
+	{ KBD_leftctrl, PAD_L2 },
+	{ KBD_rightctrl, PAD_R2 },
+	{ KBD_leftshift, PAD_L3 },
+	{ KBD_space, PAD_R3 },
+	{ KBD_NONE, 0 }
+};
+
+static char padBuf_t[2][256] __attribute__((aligned(64)));
+
+#ifdef EMBEDDED_IRX
+
+extern unsigned char iomanX_irx_start[];
+extern unsigned int iomanX_irx_size;
+
+extern unsigned char usbhdfsd_irx_start[];
+extern unsigned int usbhdfsd_irx_size;
+
+extern unsigned char usbd_irx_start[];
+extern unsigned int usbd_irx_size;
+
+extern unsigned char freesd_irx_start[];
+extern unsigned int freesd_irx_size;
+
+extern unsigned char audsrv_irx_start[];
+extern unsigned int audsrv_irx_size;
+
+extern unsigned char fileXio_irx_start[];
+extern unsigned int fileXio_irx_size;
+
+extern unsigned char ps2atad_irx_start[];
+extern unsigned int ps2atad_irx_size;
+
+extern unsigned char ps2fs_irx_start[];
+extern unsigned int ps2fs_irx_size;
+
+extern unsigned char ps2hdd_irx_start[];
+extern unsigned int ps2hdd_irx_size;
+
+extern unsigned char ps2dev9_irx_start[];
+extern unsigned int ps2dev9_irx_size;
+
+extern unsigned char poweroff_irx_start[];
+extern unsigned int poweroff_irx_size;
+
+extern unsigned char ps2kbd_irx_start[];
+extern unsigned int ps2kbd_irx_size;
+
+extern unsigned char ps2mouse_irx_start[];
+extern unsigned int ps2mouse_irx_size;
+
+#else
+
+static const char *irx_list[] = {
+	"IOMANX.IRX",
+	"FILEXIO.IRX",
+	"USBD.IRX",
+	"USBHDFSD.IRX",
+	"FREESD.IRX",
+	"AUDSRV.IRX",
+	"PS2KBD.IRX",
+	"PS2MOUSE.IRX",
+	"POWEROFF.IRX",
+	"PS2DEV9.IRX",
+	"PS2ATAD.IRX",
+	"PS2HDD.IRX",
+	"PS2FS.IRX",
+};
+
+static int loadirx(const char *modname, char *path, int argc, char *argv) {
+	char modpath[PATH_MAX];
+	int ret;
+
+	if (strlen(path) + strlen(modname) + 2 > PATH_MAX) {
+    	return -1;
+	}
+	snprintf(modpath, PATH_MAX, "%s/%s", path, modname);
+	
+	printf("Loading %s\n", modname);
+	
+	ret = SifLoadModule(modpath, argc, argv);
+	
+	if (ret < 0) {
+		printf("Failed to load %s \n", modpath);
+	}
+
+	return ret;
+}
+#endif
+
+static int load_modules() {
+	// set the arguments for loading 'ps2fs'
+	// -m 4  (maxmounts 4)
+	// -o 10 (maxopen 10)
+	// -n 40 (number of buffers 40)
+   static char pfsarg[] = "-m" "\0" "4" "\0" "-o" "\0" "10" "\0" "-n" "\0" "40";
+    // set the arguments for loading 'ps2hdd'
+	// -o 4 (maxopen 4)
+	// -n 20 (cachesize 20) 
+   static char hddarg[] = "-o" "\0" "4" "\0" "-n" "\0" "20";
+	
+	SifLoadModule("rom0:SIO2MAN", 0, NULL);
+	SifLoadModule("rom0:MCMAN", 0, NULL);
+	SifLoadModule("rom0:MCSERV", 0, NULL);
+	SifLoadModule("rom0:PADMAN", 0, NULL);
+#ifdef EMBEDDED_IRX
+    SifExecModuleBuffer(iomanX_irx_start, iomanX_irx_size, 0, NULL, NULL);
+	SifExecModuleBuffer(fileXio_irx_start, fileXio_irx_size, 0, NULL, NULL);
+	SifExecModuleBuffer(usbd_irx_start, usbd_irx_size, 0, NULL, NULL);
+	SifExecModuleBuffer(usbhdfsd_irx_start, usbhdfsd_irx_size, 0, NULL, NULL);      
+	SifExecModuleBuffer(freesd_irx_start, freesd_irx_size, 0, NULL, NULL);
+	SifExecModuleBuffer(audsrv_irx_start, audsrv_irx_size, 0, NULL, NULL);
+	SifExecModuleBuffer(ps2kbd_irx_start, ps2kbd_irx_size, 0, NULL, NULL);
+	SifExecModuleBuffer(ps2mouse_irx_start, ps2mouse_irx_size, 0, NULL, NULL);
+#ifdef IOP_RESET
+    SifExecModuleBuffer(poweroff_irx_start, poweroff_irx_size, 0, NULL, NULL);
+    SifExecModuleBuffer(ps2dev9_irx_start, ps2dev9_irx_size, 0, NULL, NULL);
+#endif
+    SifExecModuleBuffer(ps2atad_irx_start, ps2atad_irx_size, 0, NULL, NULL);
+	SifExecModuleBuffer(ps2hdd_irx_start, ps2hdd_irx_size, sizeof(hddarg), hddarg, NULL);
+	SifExecModuleBuffer(ps2fs_irx_start, ps2fs_irx_size, sizeof(pfsarg), pfsarg, NULL);
+#else
+	int i;
+	char *argv = NULL;
+	int argc = 0;
+	char cwd[PATH_MAX];
+	if (!getcwd(cwd, sizeof(cwd))) {
+		return 0;
+	}
+	for (i = 0; i < 13; i++) {
+		if (i == 11) {
+			argv = hddarg;
+			argc = sizeof(hddarg);
+		} else if(i == 12) {
+			argv = pfsarg;
+			argc = sizeof(pfsarg);
+		}
+		if (loadirx(irx_list[i], cwd, argc, argv) < 0) {
+			printf("Failed to load %s from %s\n", irx_list[i], cwd);
+			return 0;
+		}
+	}
+#endif
+	return 1;
+}
+
+static int hddinit() {
+	if (hddCheckPresent() < 0) {
+    	printf("NO HDD FOUND!\n");
+    	return 0;
+    }
+
+	printf("Found HDD!\n");
+
+	if (hddCheckFormatted() < 0) {
+		printf("HDD Not Formatted!\n");
+		return 0;	
+	}
+		
+	printf("HDD Is Formatted!\n");
+	
+	if (fileXioMount("pfs0:", "hdd0:+DOSBOX", FIO_MT_RDWR) < 0) {
+		printf("Failed to mount partition!\n");
+		return 0;
+	}
+	
+	printf("Partition mounted!\n");
+    
+    return 1;
+}
+
+static void WaitPadReady(int port, int slot) {
+	int state, lastState;
+	char stateString[16];
+
+	state = padGetState(port, slot);
+	lastState = -1;
+	while((state != PAD_STATE_DISCONN)
+		&& (state != PAD_STATE_STABLE)
+		&& (state != PAD_STATE_FINDCTP1)){
+		if (state != lastState)
+			padStateInt2String(state, stateString);
+		lastState = state;
+		state=padGetState(port, slot);
+	}
+}
+
+static void Wait_Pad_Ready(void) {
+	int state_1, state_2;
+
+	state_1 = padGetState(0, 0);
+	state_2 = padGetState(1, 0);
+	while((state_1 != PAD_STATE_DISCONN) && (state_2 != PAD_STATE_DISCONN)
+		&& (state_1 != PAD_STATE_STABLE) && (state_2 != PAD_STATE_STABLE)
+		&& (state_1 != PAD_STATE_FINDCTP1) && (state_2 != PAD_STATE_FINDCTP1)){
+		state_1 = padGetState(0, 0);
+		state_2 = padGetState(1, 0);
+	}
+}
+static int Setup_Pad(void) {
+	int ret, i, port, state, modes;
+
+	padInit(0);
+
+	for(port=0; port<2; port++){
+		if((ret = padPortOpen(port, 0, &padBuf_t[port][0])) == 0)
+			return 0;
+		WaitPadReady(port, 0);
+		state = padGetState(port, 0);
+		if(state != PAD_STATE_DISCONN){
+			modes = padInfoMode(port, 0, PAD_MODETABLE, -1);
+			if (modes != 0){
+				i = 0;
+				do{
+					if (padInfoMode(port, 0, PAD_MODETABLE, i) == PAD_TYPE_DUALSHOCK){
+						padSetMainMode(port, 0, PAD_MMODE_DUALSHOCK, PAD_MMODE_LOCK);
+						break;
+					}
+					i++;
+				} while (i < modes);
+			}
+		}
+	}
+	return 1;
+}
+
+static void ps2delay(int count) {
+   int i, ret;
+   for (i = 0; i < count; i++) 
+   {
+      ret = 0x01000000;
+      while ( ret-- ) 
+      {
+         asm("nop\nnop\nnop\nnop");
+      }
+   }
+}
+
+void ps2Init(int argc, char* argv[]) {
+#if IOP_RESET
+	SifInitRpc(0);
+	while(!SifIopReset(NULL, 0)){};
+	while(!SifIopSync()){};
+
+	fioExit();
+	SifExitIopHeap();
+	SifLoadFileExit();
+	SifExitRpc();
+	SifExitCmd();
+#endif
+	SifInitRpc(0);
+	FlushCache(0);
+	FlushCache(2);
+	
+	sbv_patch_enable_lmb();          
+	sbv_patch_disable_prefix_check();
+	sbv_patch_fileio();
+  
+	load_modules();
+	
+	ps2delay(2);
+
+	fileXioInit();
+	hddinit();
+
+	printf("PS2 inited\n");
+}
+
+void ps2Quit() {
+	printf("PS2 quit\n");
+	ps2delay(10);
+	Exit(0);
+}
+
+void Mouse_AutoLock(bool enable) {}
+
+static void KillSwitch(bool pressed) {
+	if (!pressed)
+		return;
+	throw 1;
+}
+
+void GUI_StartUp(Section * sec) {
+	Section_prop * section=static_cast<Section_prop *>(sec);
+
+	sensitivity=section->Get_int("sensitivity");
+	key_hint=section->Get_bool("keyhint");
+	
+	MAPPER_AddHandler(KillSwitch,MK_f9,MMOD1,"shutdown","ShutDown");
+}
+
+void GFX_SetTitle(Bits cycles,Bits frameskip,bool paused){ }
+
+extern void MAPPER_CheckEvent(Bitu modkey, MapKeys key, bool pressed);
+
+void GFX_Events() {
+	struct padButtonStatus pad;
+	PS2MouseData mouse;
+	PS2KbdRawKey key;
+	MapKeys xkey;
+	bool xkey_pressed = false;
+	u32 Buttons = 0;
+	int x, y;
+	static Bitu last_sample = 0, prev_pad = 0, modkey = 0;
+	static bool state_change = false, init = false;
+	static u8 leds = 0;
+	bool do_joy = false, do_keyb = false;
+
+
+	if (!init) {
+		Setup_Pad();
+		Wait_Pad_Ready();
+		JOYSTICK_Enable(0, true);
+		JOYSTICK_Button(0, 0, false);
+		JOYSTICK_Button(0, 1, false);
+		JOYSTICK_Move_X(0, 0);
+		JOYSTICK_Move_Y(0, 0);
+		init = true;
+		
+		if (PS2KbdInit()) {
+			PS2KbdSetReadmode(PS2KBD_READMODE_RAW);
+			PS2KbdSetBlockingMode(PS2KBD_NONBLOCKING);
+		}
+		else {
+			printf("Failed to initialise PS2Kbd\n");
+		}
+		
+		if (PS2MouseInit()) {
+			PS2MouseSetBoundary(0, 639, 0, 479);
+			PS2MouseSetReadMode(PS2MOUSE_READMODE_ABS);
+			PS2MouseSetPosition(320, 240);
+			PS2MouseSetAccel(2.0);
+			//PS2MouseSetThres(4);
+		}
+		else {
+			printf("Failed to initialise PS2Mouse\n");
+		}
+  
+	}
+
+	if (PIC_Ticks < (last_sample + 17)) return;
+	last_sample = PIC_Ticks;
+
+	if (padRead(0, 0, &pad)) {
+		Buttons = (PS2_ALL_BUTTON_MASK ^ pad.btns);
+	}
+	
+	if (state_change && Buttons) {
+		return;
+	}
+
+	if (Buttons == (PAD_L1 | PAD_R1 | PAD_START | PAD_DOWN)) {
+		state_change = true;
+		do_joy = true;
+		Buttons = 0;
+		pad.ljoy_h = 127;
+		pad.ljoy_v = 127;
+	}
+	if (Buttons == (PAD_L1 | PAD_R1 | PAD_START | PAD_UP)) {
+		state_change = true;
+		do_keyb = true;
+		Buttons = 0;
+	}
+
+	if (!do_joy && !do_keyb) state_change = false;
+
+	x = (int)pad.ljoy_h - 127;
+	y = (int)pad.ljoy_v - 127;
+	
+	/* 32x32 dead zone */
+	if (!((x+16)>>5) && !((y+16)>>5)) {
+		x = 0;
+		y = 0;
+	}
+
+	if (joy_state) {
+		JOYSTICK_Move_X(0, (float)x/127.0f);
+		JOYSTICK_Move_Y(0, (float)y/127.0f);
+	}
+	else if (x || y) {
+		Bits absx = (x>0)?(sensitivity):(-1*sensitivity);
+		Bits absy = (y>0)?(sensitivity):(-1*sensitivity);
+		Mouse_CursorMoved((float)(absx*x*x)/100000.0f, (float)(absy*y*y)/100000.0f, 1, 1, 1);
+	}
+
+	if (PS2MouseEnum() && PS2MouseRead(&mouse)) {
+		if (mouse.buttons > 0) {
+			Mouse_ButtonPressed(mouse.buttons - 1);
+		}
+		else {
+			Mouse_ButtonReleased(0);
+			Mouse_ButtonReleased(1);
+		}
+		
+		float mouse_x = (float) (mouse.x-(320));
+		float mouse_y = (float) (mouse.y-(240));
+		
+		//printf("mouse x %f y %f %d\n", mouse_x, mouse_y, mouse.wheel);
+		
+		Mouse_CursorMoved(mouse_x/10.0f, mouse_y/10.0f, 1, 1, 1);
+	}
+
+	if (PS2KbdReadRaw(&key) && ps2_keymap[key.key] != KBD_NONE) {
+		KBD_KEYS kbd_key = ps2_keymap[key.key];
+		bool kbd_down = key.state == PS2KBD_RAWKEY_DOWN;
+		
+		KEYBOARD_AddKey(kbd_key, kbd_down);
+
+		if (kbd_key == KBD_numlock && kbd_down) {
+			if ((leds & PS2KBD_LED_NUMLOCK) == PS2KBD_LED_NUMLOCK) {
+				leds ^= PS2KBD_LED_NUMLOCK;
+			}
+			else {
+				leds |= PS2KBD_LED_NUMLOCK;
+			}
+			PS2KbdSetLeds(leds);
+		}
+			
+		if (kbd_key == KBD_capslock && kbd_down) {
+			if ((leds & PS2KBD_LED_CAPSLOCK) == PS2KBD_LED_CAPSLOCK) {
+				leds ^= PS2KBD_LED_CAPSLOCK;
+			}
+			else {
+				leds |= PS2KBD_LED_CAPSLOCK;
+			}
+			PS2KbdSetLeds(leds);
+		}
+			
+		if (kbd_key == KBD_scrolllock && kbd_down) {
+			if ((leds & PS2KBD_LED_SCRLOCK) == PS2KBD_LED_SCRLOCK) {
+				leds ^= PS2KBD_LED_SCRLOCK;
+			}
+			else {
+				leds |= PS2KBD_LED_SCRLOCK;
+			}
+			PS2KbdSetLeds(leds);
+		}
+			
+		switch(kbd_key) {
+			case KBD_leftctrl: 
+				if(key.state == PS2KBD_RAWKEY_DOWN)
+					modkey |= MMOD1;
+				else
+					modkey ^= MMOD1;
+				break;	
+			case KBD_leftalt: 
+				if(key.state == PS2KBD_RAWKEY_DOWN)
+					modkey |= MMOD2;
+				else
+					modkey ^= MMOD2;
+				break;
+			case KBD_f1:case KBD_f2:case KBD_f3:case KBD_f4:
+			case KBD_f5:case KBD_f6:case KBD_f7:case KBD_f8:
+			case KBD_f9:case KBD_f10:case KBD_f11:case KBD_f12:	
+				xkey=(MapKeys)((Bitu)MK_f1+((Bitu)ps2_keymap[key.key]-(Bitu)KBD_f1));
+				xkey_pressed = true;
+				break;
+			case KBD_enter:
+				xkey=MK_return;
+				xkey_pressed = true;
+				break;
+			case KBD_kpminus:
+				xkey=MK_kpminus;
+				xkey_pressed = true;
+				break;
+			case KBD_scrolllock:
+				xkey=MK_scrolllock;
+				xkey_pressed = true;
+				break;
+			case KBD_pause:
+				xkey=MK_pause;
+				xkey_pressed = true;
+				break;
+			case KBD_printscreen:
+				xkey=MK_printscreen;
+				xkey_pressed = true;
+				break;
+			case KBD_home: 
+				xkey=MK_home; 
+				xkey_pressed = true;
+				break;
+			default:
+				xkey_pressed = false;
+				break;
+		}
+			
+		if (modkey != 0 && xkey_pressed) {
+			MAPPER_CheckEvent(modkey, xkey, (key.state == PS2KBD_RAWKEY_DOWN));
+		}
+	}
+	
+	if (control_map) {
+		show_key_hint = false;
+		for(Bitu i=0; inputmap[i].mask; i++) 
+			if(Buttons & inputmap[i].mask) {
+				if(prev_pad & inputmap[i].mask) continue;
+				switch(inputmap[i].key) {
+				case KBD_button1:
+					if(joy_state) JOYSTICK_Button(0, 0, true);
+					else Mouse_ButtonPressed(0);
+					break;
+				case KBD_button2:
+					if(joy_state) JOYSTICK_Button(0, 1, true);
+					else Mouse_ButtonPressed(1);
+					break;
+				default:
+					KEYBOARD_AddKey(inputmap[i].key, 1);
+				}
+			} else if(prev_pad & inputmap[i].mask) {
+				switch(inputmap[i].key) {
+				case KBD_button1:
+					if(joy_state) JOYSTICK_Button(0, 0, false);
+					else Mouse_ButtonReleased(0);
+					break;
+				case KBD_button2:
+					if(joy_state) JOYSTICK_Button(0, 1, false);
+					else Mouse_ButtonReleased(1);
+					break;
+				default: 
+					KEYBOARD_AddKey(inputmap[i].key, 0);
+				}
+			}
+	} 
+	else {
+		if(key_hint) show_key_hint = true;
+
+		if(Buttons & PAD_L1) {
+			if(!(prev_pad & PAD_L1)) {
+				if(joy_state) JOYSTICK_Button(0, 0, true);
+				else Mouse_ButtonPressed(0);
+			}
+		} else if(prev_pad & PAD_L1) {
+				if(joy_state) JOYSTICK_Button(0, 0, false);
+				else Mouse_ButtonReleased(0);
+		}
+		if(Buttons & PAD_R1) {
+			if(!(prev_pad & PAD_R1)) {
+				if(joy_state) JOYSTICK_Button(0, 1, true);
+				else Mouse_ButtonPressed(1);
+			}
+		} else if(prev_pad & PAD_R1) {
+				if(joy_state) JOYSTICK_Button(0, 1, false);
+				else Mouse_ButtonReleased(1);
+		}
+	}
+	
+	prev_pad = Buttons;
+	if (state_change) { 
+		if(do_joy) joy_state = !joy_state;
+		if(do_keyb) control_map = !control_map;
+	}
+}
+
+#else //_EE
 
 enum SCREEN_TYPES	{
 	SCREEN_SURFACE,
@@ -2230,7 +2833,7 @@ static BOOL WINAPI ConsoleEventHandler(DWORD event) {
 	}
 }
 #endif
-
+#endif //_EE
 
 /* static variable to show wether there is not a valid stdout.
  * Fixes some bugs when -noconsole is used in a read only directory */
@@ -2327,6 +2930,9 @@ void Config_Add_SDL() {
 }
 
 static void show_warning(char const * const message) {
+#ifdef _EE
+	printf("Warning: %s\n", message);
+#else
 	bool textonly = true;
 #ifdef WIN32
 	textonly = false;
@@ -2366,6 +2972,7 @@ static void show_warning(char const * const message) {
 	SDL_BlitSurface(splash_surf, NULL, sdl.surface, NULL);
 	SDL_Flip(sdl.surface);
 	SDL_Delay(12000);
+#endif
 }
 
 static void launcheditor() {
@@ -2383,9 +2990,11 @@ static void launcheditor() {
 		printf("no editor specified.\n");
 		exit(1);
 	}*/
+#ifndef _EE
 	std::string edit;
 	while(control->cmdline->FindString("-editconf",edit,true)) //Loop until one succeeds
 		execlp(edit.c_str(),edit.c_str(),path.c_str(),(char*) 0);
+#endif
 	//if you get here the launching failed!
 	printf("can't find editor(s) specified at the command line.\n");
 	exit(1);
@@ -2401,15 +3010,21 @@ void restart_program(std::vector<std::string> & parameters) {
 	// last one is NULL
 	for(Bitu i = 0; i < parameters.size(); i++) newargs[i] = (char*)parameters[i].c_str();
 	newargs[parameters.size()] = NULL;
+#ifndef _EE
 	SDL_CloseAudio();
 	SDL_Delay(50);
 	SDL_Quit();
+#endif
 #if C_DEBUG
 	// shutdown curses
 	DEBUG_ShutDown(NULL);
 #endif
 
+#ifndef _EE
 	if(execvp(newargs[0], newargs) == -1) {
+#else
+	{
+#endif
 #ifdef WIN32
 		if(newargs[0][0] == '\"') {
 			//everything specifies quotes around it if it contains a space, however my system disagrees
@@ -2448,7 +3063,9 @@ static void launchcaptures(std::string const& edit) {
 		exit(1);
 	}*/
 
+#ifndef _EE 
 	execlp(edit.c_str(),edit.c_str(),path.c_str(),(char*) 0);
+#endif
 	//if you get here the launching failed!
 	printf("can't find filemanager %s\n",edit.c_str());
 	exit(1);
@@ -2537,6 +3154,9 @@ void os2_exit()
 
 //extern void UI_Init(void);
 int main(int argc, char* argv[]) {
+#ifdef _EE
+		ps2Init(argc, argv);
+#endif
 #ifdef OS2
         PPIB pib;
         PTIB tib;
@@ -2551,7 +3171,9 @@ int main(int argc, char* argv[]) {
 		Config myconf(&com_line);
 		control=&myconf;
 		/* Init the configuration system and add default values */
+#ifndef _EE
 		Config_Add_SDL();
+#endif
 		DOSBOX_Init();
 
 		std::string editor;
@@ -2616,6 +3238,7 @@ int main(int argc, char* argv[]) {
 	LOG_MSG("Copyright 2002-2021 DOSBox Team, published under GNU GPL.");
 	LOG_MSG("---");
 
+#ifndef _EE
 	/* Init SDL */
 #if SDL_VERSION_ATLEAST(1, 2, 14)
 	/* Or debian/ubuntu with older libsdl version as they have done this themselves, but then differently.
@@ -2670,7 +3293,7 @@ int main(int argc, char* argv[]) {
 		}
 #endif
 	sdl.num_joysticks=SDL_NumJoysticks();
-
+#endif //_EE
 	/* Parse configuration files */
 	std::string config_file, config_path, config_combined;
 	Cross::GetPlatformConfigDir(config_path);
@@ -2739,6 +3362,7 @@ int main(int argc, char* argv[]) {
 		/* Init all the sections */
 		control->Init();
 		/* Some extra SDL Functions */
+#ifndef _EE
 		Section_prop * sdl_sec=static_cast<Section_prop *>(control->GetSection("sdl"));
 
 		if (control->cmdline->FindExist("-fullscreen") || sdl_sec->Get_bool("fullscreen")) {
@@ -2746,7 +3370,7 @@ int main(int argc, char* argv[]) {
 				GFX_SwitchFullScreen();
 			}
 		}
-
+#endif
 		/* Init the keyMapper */
 		MAPPER_Init();
 		if (control->cmdline->FindExist("-startmapper")) MAPPER_RunInternal();
@@ -2759,6 +3383,7 @@ int main(int argc, char* argv[]) {
 #endif
 		GFX_ShowMsg("Exit to error: %s",error);
 		fflush(NULL);
+#ifndef _EE
 		if(sdl.wait_on_error) {
 			//TODO Maybe look for some way to show message in linux?
 #if (C_DEBUG)
@@ -2769,6 +3394,7 @@ int main(int argc, char* argv[]) {
 			Sleep(5000);
 #endif
 		}
+#endif //_EE
 
 	}
 	catch (int){
@@ -2781,22 +3407,29 @@ int main(int argc, char* argv[]) {
 	sticky_keys(true); //Might not be needed if the shutdown function switches to windowed mode, but it doesn't hurt
 #endif
 	//Force visible mouse to end user. Somehow this sometimes doesn't happen
+#ifndef _EE
 	SDL_WM_GrabInput(SDL_GRAB_OFF);
 	SDL_ShowCursor(SDL_ENABLE);
 
 	SDL_Quit();//Let's hope sdl will quit as well when it catches an exception
+#endif
 #ifdef OS2
         DosGetInfoBlocks(&tib, &pib);
         if (pib->pib_ultype == 3)
         	pib->pib_ultype = 2;
         exit(0);
 #else
+#ifdef _EE
+	ps2Quit();
+#endif
 	return 0;
 #endif
 }
 
 void GFX_GetSize(int &width, int &height, bool &fullscreen) {
+#ifndef _EE
 	width = sdl.draw.width;
 	height = sdl.draw.height;
 	fullscreen = sdl.desktop.fullscreen;
+#endif
 }

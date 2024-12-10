@@ -40,12 +40,12 @@ static INLINE Bits PIC_TickIndexND(void) {
 	return CPU_CycleMax-CPU_CycleLeft-CPU_Cycles;
 }
 
-static INLINE Bits PIC_MakeCycles(double amount) {
+static INLINE Bits PIC_MakeCycles(float amount) {
 	return (Bits)(CPU_CycleMax*amount);
 }
 
-static INLINE double PIC_FullIndex(void) {
-	return PIC_Ticks+(double)PIC_TickIndex();
+static INLINE float PIC_FullIndex(void) {
+	return PIC_Ticks+(float)PIC_TickIndex();
 }
 
 void PIC_ActivateIRQ(Bitu irq);

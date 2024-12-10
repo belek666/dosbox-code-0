@@ -22,8 +22,9 @@
 #include <string>
 #include <algorithm>
 
+#ifndef _EE
 #include "SDL.h"
-
+#endif
 #include "dosbox.h"
 #include "midi.h"
 #include "cross.h"
@@ -35,6 +36,8 @@
 #include "timer.h"
 
 #define RAWBUF	1024
+
+#ifdef USE_MIDI
 
 Bit8u MIDI_evt_len[256] = {
   0,0,0,0, 0,0,0,0, 0,0,0,0, 0,0,0,0,  // 0x00
@@ -233,3 +236,15 @@ void MIDI_Init(Section * sec) {
 	test = new MIDI(sec);
 	sec->AddDestroyFunction(&MIDI_Destroy,true);
 }
+
+#else
+
+DB_Midi midi;	
+	
+void MIDI_Init(Section * src) { }
+
+void MIDI_RawOutByte(Bit8u data) { }
+
+bool MIDI_Available(void) { return false; }
+
+#endif

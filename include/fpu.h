@@ -45,6 +45,10 @@ void FPU_ESC6_EA(Bitu func,PhysPt ea);
 void FPU_ESC7_Normal(Bitu rm);
 void FPU_ESC7_EA(Bitu func,PhysPt ea);
 
+typedef union {
+	float d;
+	Bit32s l;
+} FPU_Reg_single;
 
 typedef union {
     double d;
@@ -60,7 +64,15 @@ typedef union {
     } l;
 #endif
     Bit64s ll;
-} FPU_Reg;
+} FPU_Reg_double;
+
+#ifdef FPU_FLOAT
+typedef float FVAL;
+#define FPU_Reg FPU_Reg_single
+#else
+typedef double FVAL;
+#define FPU_Reg FPU_Reg_double
+#endif
 
 typedef struct {
     Bit32u m1;

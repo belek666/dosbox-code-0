@@ -35,6 +35,315 @@
 #include "support.h"
 #include "shell.h"
 
+#ifdef _EE
+#include <malloc.h>
+#include <gsKit.h>
+#include <dmaKit.h>
+#include <gsToolkit.h>
+#include <kernel.h>
+
+GSGLOBAL *gsGlobal;
+GSTEXTURE gsTexture;
+
+#define MAX_WIDTH 720
+#define MAX_HEIGHT 480
+#define MAX_BPP GS_PSM_CT32
+
+extern bool autocycles, show_key_hint;
+extern Bit32s CPU_CyclesMax, CPU_CycleUp, CPU_CycleDown;
+
+ScalerLineHandler_t RENDER_DrawLine;
+
+static const u64 TEXTURE_RGBAQ = GS_SETREG_RGBAQ(0x80,0x80,0x80,0x80,0x00);
+static const u64 Black = GS_SETREG_RGBAQ(0x00,0x00,0x00,0x80,0x00);
+
+static bool pal_changed = false;
+static bool gsInited = false;
+static bool render_update = false;
+static int render_frameskip = 0;
+static bool render_aspect = false;
+static bool render_invert = false;
+static int render_pos = 0;
+static int render_pitch = 0;
+
+static Bit8u *render_buf;
+
+void clear_screens()
+{
+	gsKit_clear(gsGlobal, Black);
+	gsKit_queue_exec(gsGlobal);
+	gsKit_sync_flip(gsGlobal);
+	
+	gsKit_clear(gsGlobal, Black);
+	gsKit_queue_exec(gsGlobal);
+	gsKit_sync_flip(gsGlobal);
+}
+
+void RENDER_SetPal(Bit8u entry,Bit8u red,Bit8u green,Bit8u blue)
+{
+	gsTexture.Clut[entry] = GS_SETREG_RGBA(red,green,blue,0x00);
+	
+	pal_changed = true;
+}
+
+void gsInit()
+{
+    dmaKit_init(D_CTRL_RELE_OFF,D_CTRL_MFD_OFF, D_CTRL_STS_UNSPEC, D_CTRL_STD_OFF, D_CTRL_RCYC_8, 1 << DMA_CHANNEL_GIF);
+
+    dmaKit_chan_init(DMA_CHANNEL_GIF);
+    
+	if (gsGlobal != NULL)
+		gsKit_deinit_global(gsGlobal);
+	
+	gsGlobal = gsKit_init_global();
+	
+	gsGlobal->PSM = GS_PSM_CT16;  
+    gsGlobal->DoubleBuffering = GS_SETTING_OFF;
+    gsGlobal->ZBuffering = GS_SETTING_OFF;
+	gsGlobal->PrimAlphaEnable = GS_SETTING_OFF;
+				
+				gsGlobal->Mode = GS_MODE_NTSC;
+			gsGlobal->Interlace = GS_INTERLACED;
+			gsGlobal->Field = GS_FIELD;
+			gsGlobal->Width = 640;
+			gsGlobal->Height = 448;
+
+	gsKit_init_screen(gsGlobal);
+	gsKit_mode_switch(gsGlobal, GS_ONESHOT);
+	clear_screens();
+}
+
+void gsDeinit()
+{
+	clear_screens();
+
+	gsKit_vram_clear(gsGlobal);
+}
+
+void gsReload()
+{
+    gsGlobal->PSM = GS_PSM_CT16;  
+    gsGlobal->DoubleBuffering = GS_SETTING_OFF;
+    gsGlobal->ZBuffering = GS_SETTING_OFF;
+	gsGlobal->PrimAlphaEnable = GS_SETTING_OFF;
+
+	gsKit_reset_screen(gsGlobal);
+	gsKit_mode_switch(gsGlobal, GS_ONESHOT);
+}
+
+static float center_x, center_y, x2, y2;
+
+void gsTex(int width, int height, int bpp, int fullscreen, GSTEXTURE *gsTex)
+{
+    int size;
+    float ratio, w_ratio, h_ratio, y_fix = 1.0f;
+
+    gsTex->Height = height;
+    gsTex->Width = width;
+    
+    switch(bpp)
+	{
+		case 8: 
+				gsTex->PSM = GS_PSM_T8;
+				gsTex->ClutPSM = GS_PSM_CT32;
+
+				//if (gsTex->Clut == NULL) {
+					//gsTex->Clut = (u32 *)memalign(128, gsKit_texture_size(16, 16, GS_PSM_CT32));
+					//gsTex->VramClut = gsKit_vram_alloc(gsGlobal, gsKit_texture_size(16, 16, GS_PSM_CT32), GSKIT_ALLOC_USERBUFFER);
+				//}
+				break;
+		case 16:
+				gsTex->PSM = GS_PSM_CT16;
+				break;
+		case 32:
+				gsTex->PSM = GS_PSM_CT32;
+				break;
+			default:
+				break;
+	}
+	
+    //gsTex->Filter = GS_FILTER_NEAREST;
+	gsTex->Filter = GS_FILTER_LINEAR;
+    
+	//if (gsTex->Mem == NULL) {
+    	//gsTex->Mem = (u32 *)memalign(128, gsKit_texture_size_ee(MAX_WIDTH, MAX_HEIGHT, MAX_BPP));
+    	//gsTex->Vram = gsKit_vram_alloc(gsGlobal, gsKit_texture_size(MAX_WIDTH, MAX_HEIGHT, MAX_BPP), GSKIT_ALLOC_USERBUFFER);
+	//}
+
+	gsKit_setup_tbw(gsTex);
+	
+	if((gsGlobal->Interlace == GS_INTERLACED) && (gsGlobal->Field == GS_FRAME))
+		y_fix = 0.5f;
+	
+	w_ratio = (float)gsGlobal->Width / (float)gsTex->Width;
+	h_ratio = (float)(gsGlobal->Height / y_fix) / (float)gsTex->Height;
+	ratio = (w_ratio <= h_ratio) ? w_ratio : h_ratio;
+	
+	center_x = ((float)gsGlobal->Width - ((float)gsTex->Width * ratio)) / 2;
+	center_y = ((float)(gsGlobal->Height / y_fix) - ((float)gsTex->Height * ratio)) / 2;
+	
+	if (fullscreen) {
+		x2 = (float)gsGlobal->Width;
+		y2 = (float)gsGlobal->Height;
+		center_x = 0.0f;
+		center_y = 0.0f;
+	} else {
+		x2 = (float)gsTex->Width * ratio + center_x;
+		y2 = (float)gsTex->Height * y_fix * ratio + center_y;
+	}
+}
+
+void VideoFlip()
+{
+	int i;
+	
+	if (pal_changed && (gsTexture.PSM == GS_PSM_T8)) {
+
+		for (i = 0; i < 256; i++) {
+			if ((i&0x18) == 8) {
+				u32 tmp = gsTexture.Clut[i];
+				gsTexture.Clut[i] = gsTexture.Clut[i+8];
+				gsTexture.Clut[i+8] = tmp;
+			}
+		}
+	
+		SyncDCache(gsTexture.Clut, (void*)((unsigned int)gsTexture.Clut+256*2));
+		gsKit_texture_send_inline(gsGlobal, gsTexture.Clut, 16, 16, gsTexture.VramClut, gsTexture.ClutPSM, 1, GS_CLUT_PALLETE);
+	
+		pal_changed = false;
+	}
+	
+	SyncDCache(gsTexture.Mem, (void*)((unsigned int)gsTexture.Mem+gsKit_texture_size_ee(gsTexture.Width, gsTexture.Height, gsTexture.PSM)));
+	gsKit_texture_send_inline(gsGlobal, gsTexture.Mem, gsTexture.Width, gsTexture.Height, gsTexture.Vram, gsTexture.PSM, gsTexture.TBW, gsTexture.Clut ? GS_CLUT_TEXTURE : GS_CLUT_NONE);
+
+	gsKit_prim_sprite_texture(gsGlobal, &gsTexture, center_x, center_y, // x1,y1
+								0, 0, // u1,v1
+						    	x2, y2, //x2,y2
+						    	gsTexture.Width, gsTexture.Height, //u2, v2
+						    	1.0f, TEXTURE_RGBAQ);
+	
+	gsKit_sync_flip(gsGlobal);
+	gsKit_queue_exec(gsGlobal);
+}
+
+void RENDER_SetSize(Bitu width,Bitu height,Bitu bpp,float fps, double ratio, bool dblw, bool dblh) {
+	if ((!width) || (!height))  return;
+
+	printf("RENDER_SetSize: width %d height %d bpp %d \n", width, height, bpp);
+	
+	render_pitch = ((width + 15) & ~15)*(bpp/8);
+	render_update = false;
+	
+	if (gsInited) {
+		//gsDeinit();
+		//gsReload();
+		gsTex(width, height, bpp, 1, &gsTexture);
+	}
+	
+	render_buf = (Bit8u *)gsTexture.Mem;
+}
+
+static void RENDER_CopyLine(Bitu vidstart, Bitu line, VGA_Line_Handler handler) {
+	if(!render_update) return;
+	handler(vidstart, line, render_buf + render_pos);
+	render_pos += render_pitch;
+}
+
+static void IncreaseFrameSkip(bool pressed) {
+	if (!pressed)
+		return;
+	if (render_frameskip<10) render_frameskip++;
+	LOG_MSG("Frame Skip at %d",render_frameskip);
+}
+
+static void DecreaseFrameSkip(bool pressed) {
+	if (!pressed)
+		return;
+	if (render_frameskip>0) render_frameskip--;
+	LOG_MSG("Frame Skip at %d",render_frameskip);
+}
+
+volatile int vblank_count = 0;
+
+static int vblank_interrupt_handler(void)
+{
+	vblank_count++;
+  
+	ExitHandler();
+  
+	return 0;
+}
+
+void RENDER_Init(Section * sec) {
+	Section_prop * section=static_cast<Section_prop *>(sec);
+	
+	render_frameskip=section->Get_int("frameskip");
+	render_aspect=section->Get_bool("aspect");
+	render_invert=section->Get_bool("invert");
+	
+	if (!gsInited) {
+		pal_changed = true;
+		render_update = false;
+		gsInit();
+		gsKit_add_vsync_handler(&vblank_interrupt_handler);
+		gsKit_vsync_nowait();
+		gsTexture.Clut = (u32 *)memalign(128, gsKit_texture_size(16, 16, GS_PSM_CT32));
+		gsTexture.VramClut = gsKit_vram_alloc(gsGlobal, gsKit_texture_size(16, 16, GS_PSM_CT32), GSKIT_ALLOC_USERBUFFER);
+		gsTexture.Mem = (u32 *)memalign(128, gsKit_texture_size_ee(MAX_WIDTH, MAX_HEIGHT, MAX_BPP));
+		gsTexture.Vram = gsKit_vram_alloc(gsGlobal, gsKit_texture_size(MAX_WIDTH, MAX_HEIGHT, MAX_BPP), GSKIT_ALLOC_USERBUFFER);
+
+		
+		gsInited = true;
+		
+		MAPPER_AddHandler(DecreaseFrameSkip,MK_f7,MMOD1,"decfskip","Dec Fskip");
+		MAPPER_AddHandler(IncreaseFrameSkip,MK_f8,MMOD1,"incfskip","Inc Fskip");
+	}
+
+}
+
+static void RENDER_EmptyLineHandler(Bitu vidstart, Bitu line, VGA_Line_Handler handler) {}
+
+bool RENDER_StartUpdate() {
+	static Bitu count = 0;
+	
+	if (render_update) return false;
+
+	if (vblank_count >= (gsGlobal->Mode == GS_MODE_PAL ? 50 : 60)) {
+		vblank_count = 0;
+	}
+	
+	/*if (GCC_UNLIKELY(render.frameskip.count<render.frameskip.max)) {
+		render.frameskip.count++;
+		return false;
+	}*/
+
+
+	/*if (count < render_frameskip) {
+		count++;
+		return false;
+	}*/
+	
+	count = 0;
+
+	render_pos = 0;
+	render_update = true;
+	RENDER_DrawLine = RENDER_CopyLine;
+	return true;
+}
+
+void RENDER_EndUpdate(bool abort) {
+	
+	if (!render_update || abort) return;
+
+	RENDER_DrawLine = RENDER_EmptyLineHandler;
+	
+	VideoFlip();
+	
+	render_update = false;
+}
+
+#else
+
 #include "render_scalers.h"
 #include "render_glsl.h"
 
@@ -735,4 +1044,4 @@ void RENDER_Init(Section * sec) {
 	MAPPER_AddHandler(IncreaseFrameSkip,MK_f8,MMOD1,"incfskip","Inc Fskip");
 	GFX_SetTitle(-1,render.frameskip.max,false);
 }
-
+#endif

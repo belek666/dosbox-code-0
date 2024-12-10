@@ -39,7 +39,11 @@ enum MixerModes {
 
 #define MIXER_BUFSIZE (16*1024)
 #define MIXER_BUFMASK (MIXER_BUFSIZE-1)
+#ifdef _EE
+#define MixTemp ((Bit8u *)0x70000000) //Scratchpad
+#else
 extern Bit8u MixTemp[MIXER_BUFSIZE];
+#endif
 
 #define MAX_AUDIO ((1<<(16-1))-1)
 #define MIN_AUDIO -(1<<(16-1))

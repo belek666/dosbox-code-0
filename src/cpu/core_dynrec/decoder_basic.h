@@ -237,7 +237,12 @@ static Bit16u decode_fetchw(void) {
 		val|=decode_fetchb() << 8;
 		return val;
 	}
+#if defined(WORDS_BIGENDIAN) || !defined(C_UNALIGNED_MEMORY)
+		host_writew(&decode.page.wmap[decode.page.index],
+				host_readw(&decode.page.wmap[decode.page.index])+0x0101);
+#else
 	*(Bit16u *)&decode.page.wmap[decode.page.index]+=0x0101;
+#endif
 	decode.code+=2;decode.page.index+=2;
 	return mem_readw(decode.code-2);
 }
@@ -251,7 +256,12 @@ static Bit32u decode_fetchd(void) {
 		return val;
         /* Advance to the next page */
 	}
+#if defined(WORDS_BIGENDIAN) || !defined(C_UNALIGNED_MEMORY)
+		host_writed(&decode.page.wmap[decode.page.index],
+				host_readd(&decode.page.wmap[decode.page.index])+0x01010101);
+#else
 	*(Bit32u *)&decode.page.wmap[decode.page.index]+=0x01010101;
+#endif
 	decode.code+=4;decode.page.index+=4;
 	return mem_readd(decode.code-4);
 }
@@ -287,8 +297,15 @@ static void INLINE decode_increase_wmapmask(Bitu size) {
 	// update mask entries
 	switch (size) {
 		case 1 : activecb->cache.wmapmask[mapidx]+=0x01; break;
+#if defined(WORDS_BIGENDIAN) || !defined(C_UNALIGNED_MEMORY)
+		case 2 : host_writew(&activecb->cache.wmapmask[mapidx],
+				host_readw(&activecb->cache.wmapmask[mapidx])+0x0101); break;
+		case 4 : host_writed(&activecb->cache.wmapmask[mapidx],
+				host_readd(&activecb->cache.wmapmask[mapidx])+0x01010101); break;
+#else
 		case 2 : (*(Bit16u*)&activecb->cache.wmapmask[mapidx])+=0x0101; break;
 		case 4 : (*(Bit32u*)&activecb->cache.wmapmask[mapidx])+=0x01010101; break;
+#endif
 	}
 }
 

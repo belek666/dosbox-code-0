@@ -32,7 +32,7 @@
 #include "support.h"
 #include "setup.h"
 
-#if !defined(WIN32)
+#if !defined(WIN32) && !defined(_EE)
 #include <libgen.h>
 #else
 #include <string.h>
@@ -130,20 +130,26 @@ int CDROM_Interface_Image::AudioFile::getLength()
 // initialize static members
 int CDROM_Interface_Image::refCount = 0;
 CDROM_Interface_Image* CDROM_Interface_Image::images[26] = {};
+#ifdef _EE
+CDROM_Interface_Image::imagePlayer CDROM_Interface_Image::player = {
+	NULL, NULL, {0}, 0, 0, 0, false, false, false, {0} };	
+#else
 CDROM_Interface_Image::imagePlayer CDROM_Interface_Image::player = {
 	NULL, NULL, NULL, {0}, 0, 0, 0, false, false, false, { {0,0,0,0},{0,0,0,0} } };
-
+#endif
 	
 CDROM_Interface_Image::CDROM_Interface_Image(Bit8u subUnit)
                       :subUnit(subUnit)
 {
 	images[subUnit] = this;
 	if (refCount == 0) {
+#ifndef _EE
 		player.mutex = SDL_CreateMutex();
 		if (!player.channel) {
 			player.channel = MIXER_AddChannel(&CDAudioCallBack, 44100, "CDAUDIO");
 		}
 		player.channel->Enable(true);
+#endif
 	}
 	refCount++;
 }
@@ -154,8 +160,10 @@ CDROM_Interface_Image::~CDROM_Interface_Image()
 	if (player.cd == this) player.cd = NULL;
 	ClearTracks();
 	if (refCount == 0) {
+#ifndef _EE
 		SDL_DestroyMutex(player.mutex);
 		player.channel->Enable(false);
+#endif
 	}
 }
 
@@ -228,6 +236,7 @@ bool CDROM_Interface_Image::GetMediaTrayStatus(bool& mediaPresent, bool& mediaCh
 
 bool CDROM_Interface_Image::PlayAudioSector(unsigned long start,unsigned long len)
 {
+#ifndef _EE
 	// We might want to do some more checks. E.g valid start and length
 	SDL_mutexP(player.mutex);
 	player.cd = this;
@@ -244,6 +253,7 @@ bool CDROM_Interface_Image::PlayAudioSector(unsigned long start,unsigned long le
 	} else player.isPlaying = true;
 	player.isPaused = false;
 	SDL_mutexV(player.mutex);
+#endif
 	return true;
 }
 
@@ -319,6 +329,7 @@ bool CDROM_Interface_Image::ReadSector(Bit8u *buffer, bool raw, unsigned long se
 
 void CDROM_Interface_Image::CDAudioCallBack(Bitu len)
 {
+#ifndef _EE
 	len *= 4;       // 16 bit, stereo
 	if (!len) return;
 	if (!player.isPlaying || player.isPaused) {
@@ -366,6 +377,7 @@ void CDROM_Interface_Image::CDAudioCallBack(Bitu len)
 	memmove(player.buffer, &player.buffer[len], player.bufLen - len);
 	player.bufLen -= len;
 	SDL_mutexV(player.mutex);
+#endif
 }
 
 bool CDROM_Interface_Image::LoadIsoFile(char* filename)
@@ -425,7 +437,7 @@ bool CDROM_Interface_Image::CanReadPVD(TrackFile *file, int sectorSize, bool mod
 			(pvd[8] == 1 && !strncmp((char*)(&pvd[9]), "CDROM", 5) && pvd[14] == 1));
 }
 
-#if defined(WIN32)
+#if defined(WIN32) || defined(_EE)
 static string dirname(char * file) {
 	char * sep = strrchr(file, '\\');
 	if (sep == NULL)

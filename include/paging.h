@@ -29,7 +29,9 @@
 
 // disable this to reduce the size of the TLB
 // NOTE: does not work with the dynamic core (dynrec is fine)
+#ifndef _EE
 #define USE_FULL_TLB
+#endif
 
 class PageDirectory;
 
@@ -56,8 +58,12 @@ class PageDirectory;
 
 #define LINK_START	((1024+64)/4)			//Start right after the HMA
 
+#ifndef _EE
 //Allow 128 mb of memory to be linked
 #define PAGING_LINKS (128*1024/4)
+#else
+#define PAGING_LINKS (10*1024/4)
+#endif
 
 class PageHandler {
 public:

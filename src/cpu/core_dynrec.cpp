@@ -52,11 +52,19 @@
 #include "lazyflags.h"
 #include "pic.h"
 
-#define CACHE_MAXSIZE	(4096*2)
+#ifdef _EE
+#undef MIPSEL
+#define CACHE_TOTAL		(1024*1024*2)
+#define CACHE_PAGES		(512)
+#define CACHE_BLOCKS	(45*1024)
+#define CACHE_ALIGN		(4)
+#else
 #define CACHE_TOTAL		(1024*1024*8)
 #define CACHE_PAGES		(512)
 #define CACHE_BLOCKS	(128*1024)
 #define CACHE_ALIGN		(16)
+#endif
+#define CACHE_MAXSIZE	(4096*2)
 #define DYN_HASH_SHIFT	(4)
 #define DYN_PAGE_HASH	(4096>>DYN_HASH_SHIFT)
 #define DYN_LINKS		(16)

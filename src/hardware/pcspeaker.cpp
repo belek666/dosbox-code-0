@@ -258,7 +258,7 @@ static void PCSPEAKER_CallBack(Bitu len) {
 		float index=sample_base;
 		sample_base+=sample_add;
 		float end=sample_base;
-		double value=0;
+		float value=0;
 		while(index<end) {
 			/* Check if there is an upcoming event */
 			if (spkr.used && spkr.entries[pos].index<=index) {

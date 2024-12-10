@@ -46,6 +46,7 @@ typedef Bit8u HostReg;
 #define HOST_v1 3
 #define HOST_a0 4
 #define HOST_a1 5
+#define HOST_a2 6
 #define HOST_t4 12
 #define HOST_t5 13
 #define HOST_t6 14
@@ -69,7 +70,7 @@ typedef Bit8u HostReg;
 #define FC_OP2 HOST_a1
 
 // special register that holds the third parameter for _R3 calls (byte accessible)
-#define FC_OP3 HOST_???
+#define FC_OP3 HOST_a2
 
 // register that holds byte-accessible temporary values
 #define FC_TMP_BA1 HOST_t5
@@ -160,7 +161,7 @@ static void gen_mov_word_to_reg(HostReg dest_reg,void* data,bool dword) {
 			cache_addw(0x9000+(temp1<<5)+dest_reg);
 			cache_addw(lohalf+1);		// lbu temp2, 1(temp1)
 			cache_addw(0x9000+(temp1<<5)+temp2);
-#if (_MIPS_ISA==MIPS32R2) || defined(PSP)
+#if ((_MIPS_ISA==MIPS32R2) || defined(PSP)) && !defined(_EE)
 			cache_addw(0x7a04);		// ins dest_reg, temp2, 8, 8
 			cache_addw(0x7c00+(temp2<<5)+dest_reg);
 #else
@@ -259,11 +260,14 @@ static void gen_mov_byte_from_reg_low(HostReg src_reg,void* dest) {
 // the register is zero-extended (sign==false) or sign-extended (sign==true)
 static void gen_extend_byte(bool sign,HostReg reg) {
 	if (sign) {
-#if (_MIPS_ISA==MIPS32R2) || defined(PSP)
+#if ((_MIPS_ISA==MIPS32R2) || defined(PSP)) && !defined(_EE)
 		cache_addw((reg<<11)+0x420);	// seb reg, reg
 		cache_addw(0x7c00+reg);
 #else
-		arch that lacks seb
+		cache_addw((reg<<11)+(24<<6)+0); // sll reg,reg,24
+		cache_addw(reg);
+		cache_addw((reg<<11)+(24<<6)+3); // sra reg,reg,24
+		cache_addw(reg);
 #endif
 	} else {
 		cache_addw(0xff);		// andi reg, reg, 0xff
@@ -275,11 +279,14 @@ static void gen_extend_byte(bool sign,HostReg reg) {
 // the register is zero-extended (sign==false) or sign-extended (sign==true)
 static void gen_extend_word(bool sign,HostReg reg) {
 	if (sign) {
-#if (_MIPS_ISA==MIPS32R2) || defined(PSP)
+#if ((_MIPS_ISA==MIPS32R2) || defined(PSP)) && !defined(_EE)
 		cache_addw((reg<<11)+0x620);	// seh reg, reg
 		cache_addw(0x7c00+reg);
 #else
-		arch that lacks seh
+		cache_addw((reg<<11)+(16<<6)+0); // sll reg,reg,16
+		cache_addw(reg);
+		cache_addw((reg<<11)+(16<<6)+3); // sra reg,reg,16
+		cache_addw(reg);
 #endif
 	} else {
 		cache_addw(0xffff);		// andi reg, reg, 0xffff
@@ -625,7 +632,7 @@ static void gen_fill_function_ptr(const Bit8u * pos,void* fct_ptr,Bitu flags_typ
 		case t_SARd:
 			cache_addd(0x00a41007,pos);					// srav $v0, $a0, $a1
 			break;
-#if (_MIPS_ISA==MIPS32R2) || defined(PSP)
+#if ((_MIPS_ISA==MIPS32R2) || defined(PSP)) && !defined(_EE)
 		case t_RORd:
 			cache_addd(0x00a41046,pos);					// rotr $v0, $a0, $a1
 			break;
@@ -636,7 +643,7 @@ static void gen_fill_function_ptr(const Bit8u * pos,void* fct_ptr,Bitu flags_typ
 			cache_addd(0x00041023,pos);					// subu $v0, $0, $a0
 			break;
 		default:
-			cache_addd(0x0c000000+(((Bit32u)fct_ptr)>>2)&0x3ffffff,pos);		// jal simple_func
+			cache_addd(0x0c000000+((((Bit32u)fct_ptr)>>2)&0x3ffffff),pos);		// jal simple_func
 			break;
 	}
 #else
@@ -653,6 +660,25 @@ static void cache_block_closing(const Bit8u* block_start,Bitu block_size) {
 	for (;inval_start < inval_end; inval_start+=64) {
 		__builtin_allegrex_cache(0x1a, inval_start);
 		__builtin_allegrex_cache(0x08, inval_start);
+	}
+#elif defined(_EE)
+	Bit32u inval_start = ((Bit32u)block_start) & ~63;
+	Bit32u inval_end = (((Bit32u)block_start) + block_size + 64) & ~63;
+	for (;inval_start < inval_end; inval_start+=64) {
+		__asm__ __volatile__(
+			".set noreorder\n\t"
+		
+			"sync.l \n"
+			"cache 0x18, (%0) \n"
+			"sync.l \n"
+			"sync.p \n"
+			"cache 0x0B, (%0) \n"
+			"sync.p \n"
+			".set reorder\n\t"
+			
+			: "=r" (inval_start)
+			: "0" (inval_start)
+		);
 	}
 #endif
 }

@@ -469,8 +469,8 @@ void Mouse_CursorMoved(float xrel,float yrel,float x,float y,bool emulate) {
 	float dx = xrel * mouse.pixelPerMickey_x;
 	float dy = yrel * mouse.pixelPerMickey_y;
 
-	if((fabs(xrel) > 1.0) || (mouse.senv_x < 1.0)) dx *= mouse.senv_x;
-	if((fabs(yrel) > 1.0) || (mouse.senv_y < 1.0)) dy *= mouse.senv_y;
+	if((fabsf(xrel) > 1.0) || (mouse.senv_x < 1.0)) dx *= mouse.senv_x;
+	if((fabsf(yrel) > 1.0) || (mouse.senv_y < 1.0)) dy *= mouse.senv_y;
 	if (useps2callback) dy *= 2;	
 
 	mouse.mickey_x += (dx * mouse.mickeysPerPixel_x);

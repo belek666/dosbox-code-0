@@ -19,7 +19,11 @@
 
 #include "vga.h"
 
+#ifdef _EE
+#define S3_LFB_BASE		0xFF00000
+#else
 #define S3_LFB_BASE		0xC0000000
+#endif
 
 #define BIOSMEM_SEG		0x40
 

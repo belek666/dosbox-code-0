@@ -232,7 +232,7 @@ struct private_hwdata {
 #include "joystick.h"
 #include "keymap.h"
 
-static int sensitivity;
+static int xsensitivity, ysensitivity;
 bool control_map = false, joy_state = false, irkeyb = false, show_key_hint = false;
 bool autofire = false, startup_state_capslock = false, startup_state_numlock = false;
 
@@ -540,7 +540,10 @@ static void KillSwitch(bool pressed) {
 void GUI_StartUp(Section * sec) {
 	Section_prop * section=static_cast<Section_prop *>(sec);
 
-	sensitivity=section->Get_int("sensitivity");
+	Prop_multival* p3 = section->Get_multival("sensitivity");
+	xsensitivity = p3->GetSection()->Get_int("xsens");
+	ysensitivity = p3->GetSection()->Get_int("ysens");
+	
 	key_hint=section->Get_bool("keyhint");
 	
 	MAPPER_AddHandler(KillSwitch,MK_f9,MMOD1,"shutdown","ShutDown");
@@ -584,10 +587,10 @@ void GFX_Events() {
 		
 		if (PS2MouseInit()) {
 			PS2MouseSetBoundary(0, 639, 0, 479);
-			PS2MouseSetReadMode(PS2MOUSE_READMODE_ABS);
+			PS2MouseSetReadMode(PS2MOUSE_READMODE_DIFF);
 			PS2MouseSetPosition(320, 240);
 			PS2MouseSetAccel(2.0);
-			//PS2MouseSetThres(4);
+			PS2MouseSetThres(4);
 		}
 		else {
 			printf("Failed to initialise PS2Mouse\n");
@@ -606,14 +609,14 @@ void GFX_Events() {
 		return;
 	}
 
-	if (Buttons == (PAD_L1 | PAD_R1 | PAD_START | PAD_DOWN)) {
+	if (Buttons == (PAD_L1 | PAD_R1 | PAD_L2 | PAD_R2 | PAD_R3)) {
 		state_change = true;
 		do_joy = true;
 		Buttons = 0;
 		pad.ljoy_h = 127;
 		pad.ljoy_v = 127;
 	}
-	if (Buttons == (PAD_L1 | PAD_R1 | PAD_START | PAD_UP)) {
+	if (Buttons == (PAD_L1 | PAD_R1 | PAD_L2 | PAD_R2 | PAD_L3)) {
 		state_change = true;
 		do_keyb = true;
 		Buttons = 0;
@@ -635,8 +638,8 @@ void GFX_Events() {
 		JOYSTICK_Move_Y(0, (float)y/127.0f);
 	}
 	else if (x || y) {
-		Bits absx = (x>0)?(sensitivity):(-1*sensitivity);
-		Bits absy = (y>0)?(sensitivity):(-1*sensitivity);
+		Bits absx = (x>0)?(xsensitivity):(-1*xsensitivity);
+		Bits absy = (y>0)?(ysensitivity):(-1*ysensitivity);
 		Mouse_CursorMoved((float)(absx*x*x)/100000.0f, (float)(absy*y*y)/100000.0f, 1, 1, 1);
 	}
 
@@ -649,12 +652,11 @@ void GFX_Events() {
 			Mouse_ButtonReleased(1);
 		}
 		
-		float mouse_x = (float) (mouse.x-(320));
-		float mouse_y = (float) (mouse.y-(240));
-		
-		//printf("mouse x %f y %f %d\n", mouse_x, mouse_y, mouse.wheel);
-		
-		Mouse_CursorMoved(mouse_x/10.0f, mouse_y/10.0f, 1, 1, 1);
+		Mouse_CursorMoved((float)mouse.x*xsensitivity/100.0f,
+						  (float)mouse.y*ysensitivity/100.0f,
+						  0,
+						  0,
+						  1);
 	}
 
 	if (PS2KbdReadRaw(&key) && ps2_keymap[key.key] != KBD_NONE) {
@@ -3171,9 +3173,7 @@ int main(int argc, char* argv[]) {
 		Config myconf(&com_line);
 		control=&myconf;
 		/* Init the configuration system and add default values */
-#ifndef _EE
 		Config_Add_SDL();
-#endif
 		DOSBOX_Init();
 
 		std::string editor;
@@ -3397,12 +3397,12 @@ int main(int argc, char* argv[]) {
 #endif //_EE
 
 	}
-	catch (int){
+	/*catch (int){
 		; //nothing, pressed killswitch
 	}
 	catch(...){
 		; // Unknown error, let's just exit.
-	}
+	}*/
 #if defined (WIN32)
 	sticky_keys(true); //Might not be needed if the shutdown function switches to windowed mode, but it doesn't hurt
 #endif

@@ -39,7 +39,7 @@ all: $(EE_BIN)
 _install: pack
 	mkdir -p bin
 	cp -f dosbox.conf bin
-	#cp -f $(EE_BIN:.ELF=-PACKED.ELF) ./bin/
+	cp -f $(EE_BIN:.ELF=-PACKED.ELF) ./bin/
 	cp -f $(EE_BIN) ./bin/
 ifeq ($(EMBEDDED_IRX), 0)
 	cp -f $(PS2SDK)/iop/irx/iomanX.irx ./bin/IOMANX.IRX

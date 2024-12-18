@@ -36,6 +36,7 @@
 #include "shell.h"
 
 #ifdef _EE
+
 #include <malloc.h>
 #include <gsKit.h>
 #include <dmaKit.h>
@@ -68,6 +69,9 @@ static int render_pitch = 0;
 
 static Bit8u *render_buf;
 
+static Bit32u clut_buf[256] __attribute__((aligned(64)));
+static Bit32u texture_buf[MAX_WIDTH * MAX_HEIGHT] __attribute__((aligned(64)));
+
 void clear_screens()
 {
 	gsKit_clear(gsGlobal, Black);
@@ -97,19 +101,19 @@ void gsInit()
 	
 	gsGlobal = gsKit_init_global();
 	
-	gsGlobal->PSM = GS_PSM_CT16;  
-    gsGlobal->DoubleBuffering = GS_SETTING_OFF;
+	gsGlobal->PSM = GS_PSM_CT32;  
+    gsGlobal->DoubleBuffering = GS_SETTING_ON;
     gsGlobal->ZBuffering = GS_SETTING_OFF;
 	gsGlobal->PrimAlphaEnable = GS_SETTING_OFF;
 				
-				gsGlobal->Mode = GS_MODE_NTSC;
-			gsGlobal->Interlace = GS_INTERLACED;
-			gsGlobal->Field = GS_FIELD;
-			gsGlobal->Width = 640;
-			gsGlobal->Height = 448;
+	gsGlobal->Mode = GS_MODE_NTSC;
+	gsGlobal->Interlace = GS_INTERLACED;
+	gsGlobal->Field = GS_FIELD;
+	gsGlobal->Width = 640;
+	gsGlobal->Height = 448;
 
 	gsKit_init_screen(gsGlobal);
-	gsKit_mode_switch(gsGlobal, GS_ONESHOT);
+	//gsKit_mode_switch(gsGlobal, GS_ONESHOT);
 	clear_screens();
 }
 
@@ -146,11 +150,6 @@ void gsTex(int width, int height, int bpp, int fullscreen, GSTEXTURE *gsTex)
 		case 8: 
 				gsTex->PSM = GS_PSM_T8;
 				gsTex->ClutPSM = GS_PSM_CT32;
-
-				//if (gsTex->Clut == NULL) {
-					//gsTex->Clut = (u32 *)memalign(128, gsKit_texture_size(16, 16, GS_PSM_CT32));
-					//gsTex->VramClut = gsKit_vram_alloc(gsGlobal, gsKit_texture_size(16, 16, GS_PSM_CT32), GSKIT_ALLOC_USERBUFFER);
-				//}
 				break;
 		case 16:
 				gsTex->PSM = GS_PSM_CT16;
@@ -164,11 +163,6 @@ void gsTex(int width, int height, int bpp, int fullscreen, GSTEXTURE *gsTex)
 	
     //gsTex->Filter = GS_FILTER_NEAREST;
 	gsTex->Filter = GS_FILTER_LINEAR;
-    
-	//if (gsTex->Mem == NULL) {
-    	//gsTex->Mem = (u32 *)memalign(128, gsKit_texture_size_ee(MAX_WIDTH, MAX_HEIGHT, MAX_BPP));
-    	//gsTex->Vram = gsKit_vram_alloc(gsGlobal, gsKit_texture_size(MAX_WIDTH, MAX_HEIGHT, MAX_BPP), GSKIT_ALLOC_USERBUFFER);
-	//}
 
 	gsKit_setup_tbw(gsTex);
 	
@@ -222,8 +216,8 @@ void VideoFlip()
 						    	gsTexture.Width, gsTexture.Height, //u2, v2
 						    	1.0f, TEXTURE_RGBAQ);
 	
-	gsKit_sync_flip(gsGlobal);
 	gsKit_queue_exec(gsGlobal);
+	gsKit_sync_flip(gsGlobal);
 }
 
 void RENDER_SetSize(Bitu width,Bitu height,Bitu bpp,float fps, double ratio, bool dblw, bool dblh) {
@@ -287,9 +281,9 @@ void RENDER_Init(Section * sec) {
 		gsInit();
 		gsKit_add_vsync_handler(&vblank_interrupt_handler);
 		gsKit_vsync_nowait();
-		gsTexture.Clut = (u32 *)memalign(128, gsKit_texture_size(16, 16, GS_PSM_CT32));
+		gsTexture.Clut = (u32 *)clut_buf;
 		gsTexture.VramClut = gsKit_vram_alloc(gsGlobal, gsKit_texture_size(16, 16, GS_PSM_CT32), GSKIT_ALLOC_USERBUFFER);
-		gsTexture.Mem = (u32 *)memalign(128, gsKit_texture_size_ee(MAX_WIDTH, MAX_HEIGHT, MAX_BPP));
+		gsTexture.Mem = (u32 *)texture_buf;
 		gsTexture.Vram = gsKit_vram_alloc(gsGlobal, gsKit_texture_size(MAX_WIDTH, MAX_HEIGHT, MAX_BPP), GSKIT_ALLOC_USERBUFFER);
 
 		
